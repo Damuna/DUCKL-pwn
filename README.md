@@ -30,7 +30,7 @@ Flags (high-level descriptions):
 ### Example usage
 Tto automatically collect and ingest bloodound data
 ```sh
-ducklpwn -u [USER] [-p PASSWORD] -dc [DC_FQDN] --dc-ip [DC_IP] [-k]
+ducklpwn -u [USER] [-p PASSWORD] -dc [DC_FQDN] --dc-ip [DC_IP] 
 ```
 If bloodhound data are already uploaded
 ```sh
