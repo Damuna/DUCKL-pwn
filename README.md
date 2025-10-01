@@ -1,5 +1,17 @@
 # DUCKL-pwn
-Exploiting DACLs like a quacking pro!
+=============================================================
+   ____  _     ____  _  __ _           ____  _      _     
+  /  _ \/ \ /\/   _\/ |/ // \         /  __\/ \  /|/ \  /|
+  | | \|| | |||  /  |   / | |   _____ |  \/|| |  ||| |\ ||
+  | |_/|| \_/||  \__|   \ | |_/\\____\|  __/| |/\||| | \||
+  \____/\____/\____/\_|\_\\____/      \_/   \_/  \|\_/  \|
+                                                        
+  > Exploiting DACLs like a quacking pro!
+        _          _          _          _          _
+    >(')____,  >(')____,  >(')____,  >(')____,  >(') ___,
+      (` =~~/    (` =~~/    (` =~~/    (` =~~/    (` =~~/
+  ~^~^`---'~^~^~^`---'~^~^~^`---'~^~^~^`---'~^~^~^`---'~^~^~
+=============================================================
 ## Requirements
 - [bhcli](https://github.com/exploide/bhcli)
 - [targetedKerberoast](https://github.com/ShutdownRepo/targetedKerberoast) — optional, used for certain automated actions
