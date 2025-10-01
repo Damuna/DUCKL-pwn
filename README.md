@@ -11,28 +11,28 @@ cp .env.example .env
 ```
 ## Usage 
 Flags (high-level descriptions):
-- `--dc [DC_FQDN]`
-  Domain Controller fully-qualified domain name (used to target analysis within your lab).
-- `--ns [DC_IP]`
-  IP address of the name server or target host (used for integration in lab).
+- `-dc [DC_FQDN]`
+  Domain Controller fully-qualified domain name.
+- `--dc-ip [DC_IP]`
+  IP address of the name server or target host.
 - `--no-gather`
   Run the analysis/pwn path using previously gathered graph/artifacts; skip the collection phase.
 - `-u [USER]`
-  Username under which to perform collection actions (only used in authorized testing).
+  Username of the LDAP usare to perform collection actions.
 - `-p [PASSWORD]`
-  Password override (for local lab/harness only). Avoid storing plaintext passwords in .env.
+  Password of the LDAP usare to perform collection actions.
 - `-H [HASH]`
-  Optional credential hash to use for authentication in local testing harnesses.
+  Hash of the LDAP usare to perform collection actions.
 - `-k`
-  Toggle for specific collection/analysis behavior (tool-specific; consult developer notes).
+  Kerberos Ticket path of the LDAP usare to perform collection actions..
 - `--help or -h`
   Show usage/help text.
 ### Example usage
 Tto automatically collect and ingest bloodound data
 ```sh
-ducklpwn -u [USER] [-p PASSWORD] --dc [DC_FQDN] --ns [DC_IP] [-k]
+ducklpwn -u [USER] [-p PASSWORD] -dc [DC_FQDN] --dc-ip [DC_IP] [-k]
 ```
 If bloodhound data are already uploaded
 ```sh
-ducklpwn --dc [DC_FQDN] --ns [DC_IP] --no-gather
+ducklpwn -dc [DC_FQDN] --dc-ip [DC_IP] --no-gather
 ```
