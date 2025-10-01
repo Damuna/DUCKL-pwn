@@ -26,7 +26,7 @@ Copy the example config file `.env.example` into `.env` and edit locally
 cp .env.example .env
 ```
 ## Usage 
-Flags (high-level descriptions):
+Flags:
 - `-dc [DC_FQDN]`
   Domain Controller fully-qualified domain name.
 - `--dc-ip [DC_IP]`
@@ -34,21 +34,21 @@ Flags (high-level descriptions):
 - `--no-gather`
   Run the analysis/pwn path using previously gathered graph/artifacts; skip the collection phase.
 - `-u [USER]`
-  Username of the LDAP usare to perform collection actions.
+  Username of the LDAP to perform Bloodhound collection.
 - `-p [PASSWORD]`
-  Password of the LDAP usare to perform collection actions.
+  Password of the LDAP to perform Bloodhound collection.
 - `-H [HASH]`
-  Hash of the LDAP usare to perform collection actions.
+  Hash of the LDAP to perform Bloodhound collection.
 - `-k`
-  Kerberos Ticket path of the LDAP usare to perform collection actions..
+  Kerberos Ticket path of the LDAP to perform Bloodhound collection.
 - `--help or -h`
   Show usage/help text.
 ### Example usage
-Tto automatically collect and ingest bloodound data
+Tto automatically collect and ingest Bloodhound data
 ```sh
-ducklpwn -u [USER] [-p PASSWORD] -dc [DC_FQDN] --dc-ip [DC_IP] 
+ducklpwn.sh -u [USER] [-p PASSWORD] -dc [DC_FQDN] --dc-ip [DC_IP] 
 ```
-If bloodhound data are already uploaded
+If Bloodhound data are already uploaded
 ```sh
-ducklpwn -dc [DC_FQDN] --dc-ip [DC_IP] --no-gather
+ducklpwn.sh -dc [DC_FQDN] --dc-ip [DC_IP] --no-gather
 ```
