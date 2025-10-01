@@ -9,7 +9,7 @@ Copy the example config file `.env.example` into `.env` and edit locally
 ```sh
 cp .env.example .env
 ```
-### Usage 
+## Usage 
 Flags (high-level descriptions):
 - `--dc [DC_FQDN]`
   Domain Controller fully-qualified domain name (used to target analysis within your lab).
@@ -27,7 +27,7 @@ Flags (high-level descriptions):
   Toggle for specific collection/analysis behavior (tool-specific; consult developer notes).
 - `--help or -h`
   Show usage/help text.
-#### Example usage
+### Example usage
 Tto automatically collect and ingest bloodound data
 ```sh
 ducklpwn -u [USER] [-p PASSWORD] --dc [DC_FQDN] --ns [DC_IP] [-k]
