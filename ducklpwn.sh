@@ -1,20 +1,46 @@
 #!/bin/bash
 
-echo '
-----------<> DuckL-PWN <>----------
-   __
- <(o )___
-  ( ._> /
-   `---´  
-  > Exploiting DACLs like a quacking pro!
------------------------------------
-'
-
 usage(){
-    echo -e "\n[+] USAGE"
-    echo -e "ducklpwn -dc [DC_FQDN] --dc-ip [DC_IP] --no-gather                             (Skip Ingestion, pwn previously gathered ACLs)"
-    echo -e "ducklpwn -u [USER] -dc [DC_FQDN] --dc-ip [DC_IP] [-p PASSWORD] [-H HASH] [-k]  (Gathers LDAP Data as USER, pwn collected ACLs)"
-    exit 1
+  cat <<'USAGE'
+=============================================================
+   ____  _     ____  _  __ _           ____  _      _     
+  /  _ \/ \ /\/   _\/ |/ // \         /  __\/ \  /|/ \  /|
+  | | \|| | |||  /  |   / | |   _____ |  \/|| |  ||| |\ ||
+  | |_/|| \_/||  \__|   \ | |_/\\____\|  __/| |/\||| | \||
+  \____/\____/\____/\_|\_\\____/      \_/   \_/  \|\_/  \|
+                                                        
+  > Exploiting DACLs like a quacking pro!
+        _          _          _          _          _
+    >(')____,  >(')____,  >(')____,  >(')____,  >(') ___,
+      (` =~~/    (` =~~/    (` =~~/    (` =~~/    (` =~~/
+  ~^~^`---'~^~^~^`---'~^~^~^`---'~^~^~^`---'~^~^~^`---'~^~^~
+=============================================================
+
+USAGE
+  ducklpwn [options]
+
+DESCRIPTION
+  Generates Bloodhound chains and exploits them automatically.
+
+FLAGS
+  -dc <DC_FQDN>        Domain Controller fully-qualified domain name (target scope for analysis)
+  --dc-ip <DC_IP>      IP address of the name server or target host
+  --no-gather          Skip collection; run analysis/automation on previously gathered/imported data
+  -u <USER>            Username used for LDAP collection
+  -p <PASSWORD>        Password for the user 
+  -H <HASH>            NTLM/LM hash for the user 
+  -k <TICKET_PATH>     Path to a Kerberos ticket file to use for authentication 
+  -h, --help           Show this help text and exit
+
+EXAMPLES
+  # Collect and ingest BloodHound data then run analysis
+  ducklpwn -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5
+
+  # Run analysis / automation using previously gathered data (no collection)
+  ducklpwn -dc corp.local --dc-ip 10.0.0.5 --no-gather
+
+USAGE
+  exit 0
 }
 
 # Load configuration .env environment
