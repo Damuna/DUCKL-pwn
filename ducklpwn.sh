@@ -1,45 +1,42 @@
 #!/bin/bash
-
+ echo "============================================================="
+  echo "   ____  _     ____  _  __ _           ____  _      _     "
+  echo "  /  _ \/ \ /\/   _\/ |/ // \         /  __\/ \  /|/ \  /|"
+  echo "  | | \|| | |||  /  |   / | |   _____ |  \/|| |  ||| |\ ||"
+  echo "  | |_/|| \_/||  \__|   \ | |_/\\____\|  __/| |/\||| | \||"
+  echo "  \____/\____/\____/\_|\_\\____/      \_/   \_/  \|\_/  \|"
+  echo "                                                        "
+  echo "  > Exploiting DACLs like a quacking pro!"
+  echo "      _          _          _          _          _"
+  echo "    >(')____,  >(')____,  >(')____,  >(')____,  >(') ____,"
+  echo "      (\` =~~/    (\` =~~/    (\` =~~/    (\` =~~/    (\` =~~/"
+  echo "  ~^~^\`---'~^~^~^\`---'~^~^~^\`---'~^~^~^\`---'~^~^~^\`---'~^~^~"
+  echo "============================================================="
+  echo ""
 usage(){
-  cat <<'USAGE'
-=============================================================
-   ____  _     ____  _  __ _           ____  _      _     
-  /  _ \/ \ /\/   _\/ |/ // \         /  __\/ \  /|/ \  /|
-  | | \|| | |||  /  |   / | |   _____ |  \/|| |  ||| |\ ||
-  | |_/|| \_/||  \__|   \ | |_/\\____\|  __/| |/\||| | \||
-  \____/\____/\____/\_|\_\\____/      \_/   \_/  \|\_/  \|
-                                                        
-  > Exploiting DACLs like a quacking pro!
-        _          _          _          _          _
-    >(')____,  >(')____,  >(')____,  >(')____,  >(') ___,
-      (` =~~/    (` =~~/    (` =~~/    (` =~~/    (` =~~/
-  ~^~^`---'~^~^~^`---'~^~^~^`---'~^~^~^`---'~^~^~^`---'~^~^~
-=============================================================
+  echo "USAGE"
+  echo "  ducklpwn [options]"
+  echo ""
+echo "DESCRIPTION"
+echo "  Generates Bloodhound chains and exploits them automatically."
 
-USAGE
-  ducklpwn [options]
+echo -e "\nFLAG"
+echo "  -dc <DC_FQDN>        Domain Controller fully-qualified domain name (target scope for analysis)"
+echo "  --dc-ip <DC_IP>      IP address of the name server or target host"
+echo "  --no-gather          Skip collection; run analysis/automation on previously gathered/imported data"
+echo "  -u <USER>            Username used for LDAP collection"
+echo "  -p <PASSWORD>        Password for the user "
+echo "  -H <HASH>            NTLM/LM hash for the user "
+echo "  -k <TICKET_PATH>     Path to a Kerberos ticket file to use for authentication "
+echo "  -h, --help           Show this help text and exit"
 
-DESCRIPTION
-  Generates Bloodhound chains and exploits them automatically.
+echo -e "\nEXAMPLES"
+echo "  # Collect and ingest BloodHound data then run analysis"
+echo "  ducklpwn -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5"
 
-FLAGS
-  -dc <DC_FQDN>        Domain Controller fully-qualified domain name (target scope for analysis)
-  --dc-ip <DC_IP>      IP address of the name server or target host
-  --no-gather          Skip collection; run analysis/automation on previously gathered/imported data
-  -u <USER>            Username used for LDAP collection
-  -p <PASSWORD>        Password for the user 
-  -H <HASH>            NTLM/LM hash for the user 
-  -k <TICKET_PATH>     Path to a Kerberos ticket file to use for authentication 
-  -h, --help           Show this help text and exit
+echo "  # Run analysis / automation using previously gathered data (no collection)"
+echo "  ducklpwn -dc corp.local --dc-ip 10.0.0.5 --no-gather"
 
-EXAMPLES
-  # Collect and ingest BloodHound data then run analysis
-  ducklpwn -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5
-
-  # Run analysis / automation using previously gathered data (no collection)
-  ducklpwn -dc corp.local --dc-ip 10.0.0.5 --no-gather
-
-USAGE
   exit 0
 }
 

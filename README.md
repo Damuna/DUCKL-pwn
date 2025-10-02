@@ -23,7 +23,7 @@ jgs~^~^`---'~^~^~^`---'~^~^~^`---'~^~^~^`---'~^~^~^`---'~^~^~
 ## Configuration
 Copy the example config file `.env.example` into `.env` and edit locally
 ```sh
-cp .env.example .env
+chmod +x ducklpwn.sh; cp .env.example .env
 ```
 ## Usage 
 Flags:
@@ -46,9 +46,9 @@ Flags:
 ### Example usage
 Tto automatically collect and ingest Bloodhound data
 ```sh
-ducklpwn.sh -u [USER] [-p PASSWORD] -dc [DC_FQDN] --dc-ip [DC_IP] 
+./ducklpwn.sh -u [USER] [-p PASSWORD] -dc [DC_FQDN] --dc-ip [DC_IP] 
 ```
 If Bloodhound data are already uploaded
 ```sh
-ducklpwn.sh -dc [DC_FQDN] --dc-ip [DC_IP] --no-gather
+./ducklpwn.sh -dc [DC_FQDN] --dc-ip [DC_IP] --no-gather
 ```
