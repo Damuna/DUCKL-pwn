@@ -44,7 +44,7 @@ Flags:
 - `--help or -h`
   Show usage/help text.
 ### Example usage
-Tto automatically collect and ingest Bloodhound data
+To automatically collect and ingest Bloodhound data
 ```sh
 ./ducklpwn.sh -u [USER] [-p PASSWORD] -dc [DC_FQDN] --dc-ip [DC_IP] 
 ```
