@@ -19,8 +19,10 @@ jgs~^~^`---'~^~^~^`---'~^~^~^`---'~^~^~^`---'~^~^~^`---'~^~^~
 ## Requirements
 - Bloodhound community Edition
 - [bhcli](https://github.com/exploide/bhcli)
+- [bloodhound-cli](https://github.com/SpecterOps/bloodhound-cli)
 - [targetedKerberoast](https://github.com/ShutdownRepo/targetedKerberoast) — optional, used for certain automated actions
 - [pyGPOAbuse](https://github.com/Hackndo/pyGPOAbuse) — optional, used for certain automated actions
+
 ## Configuration
 Copy the example config file `.env.example` into `.env` and edit locally
 ```sh

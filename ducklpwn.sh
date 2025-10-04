@@ -13,7 +13,7 @@ MAGENTA='\033[0;95m'    # GPOs (Light Magenta)
 NC='\033[0m'            # No Color
 BOLD='\033[1m'
 
- echo "============================================================="
+  echo "============================================================="
   echo "   ____  _     ____  _  __ _           ____  _      _     "
   echo "  /  _ \/ \ /\/   _\/ |/ // \         /  __\/ \  /|/ \  /|"
   echo "  | | \|| | |||  /  |   / | |   _____ |  \/|| |  ||| |\ ||"
@@ -29,27 +29,35 @@ BOLD='\033[1m'
   echo ""
 usage(){
   echo "USAGE"
-  echo "  ducklpwn [options]"
+  echo "  ./ducklpwn.sh [options]"
   echo ""
-echo "DESCRIPTION"
-echo "  Generates Bloodhound chains and exploits them automatically."
+  echo "DESCRIPTION"
+  echo "  Generates Bloodhound chains and exploits them automatically."
 
-echo -e "\nFLAG"
-echo "  -dc <DC_FQDN>        Domain Controller fully-qualified domain name (target scope for analysis)"
-echo "  --dc-ip <DC_IP>      IP address of the name server or target host"
-echo "  --no-gather          Skip collection; run analysis/automation on previously gathered/imported data"
-echo "  -u <USER>            Username used for LDAP collection"
-echo "  -p <PASSWORD>        Password for the user "
-echo "  -H <HASH>            NTLM/LM hash for the user "
-echo "  -k <TICKET_PATH>     Path to a Kerberos ticket file to use for authentication "
-echo "  -h, --help           Show this help text and exit"
+  echo -e "\nFLAGS"
+  echo "  -dc <DC_FQDN>        Domain Controller fully-qualified domain name (target scope for analysis)"
+  echo "  --dc-ip <DC_IP>      IP address of the name server or target host"
+  echo "  --no-gather          Skip collection; run analysis/automation on previously gathered/imported data"
+  echo "  -u <USER>            Username used for LDAP collection"
+  echo "  -p <PASSWORD>        Password for the user"
+  echo "  -H <HASH>            NTLM/LM hash for the user"
+  echo "  -k <TICKET_PATH>     Path to a Kerberos ticket file to use for authentication"
+  echo "  --all                Build attack chains for all possible users in the domain"
+  echo "  --owned <FILE>       Build attack chains for owned users listed in the specified file (UPN for users and FQDN for PCs)"
+  echo "  -h, --help           Show this help text and exit"
 
-echo -e "\nEXAMPLES"
-echo "  # Collect and ingest BloodHound data then run analysis"
-echo "  ducklpwn -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5"
-
-echo "  # Run analysis / automation using previously gathered data (no collection)"
-echo "  ducklpwn -dc corp.local --dc-ip 10.0.0.5 --no-gather"
+  echo -e "\nEXAMPLES"
+  echo "  # Collect and ingest BloodHound data then run analysis for all users"
+  echo "  ducklpwn -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5 --all"
+  
+  echo "  # Collect and run analysis for specific owned users"
+  echo "  ducklpwn -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5 --owned owned.txt"
+  
+  echo "  # Run analysis using previously gathered data for all users"
+  echo "  ducklpwn -dc corp.local --dc-ip 10.0.0.5 --no-gather --all"
+  
+  echo "  # Run analysis using previously gathered data for owned users"
+  echo "  ducklpwn -dc corp.local --dc-ip 10.0.0.5 --no-gather --owned owned.txt"
 
   exit 0
 }
@@ -64,7 +72,6 @@ if [ -f "$ENV_FILE" ]; then
 else
   echo "[-] Warning: .env file not found at $ENV_FILE"
 fi
-
 USERNAME=""
 PASSWORD=""
 HASH=""
@@ -72,6 +79,8 @@ KB=""
 NO_GATHER=false
 DC_FQDN=""
 DC_IP=""
+ALL_FLAG=false
+OWNED_FILE=""
 
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
@@ -129,11 +138,23 @@ while [[ $# -gt 0 ]]; do
                 echo -e "[-] ERROR: Empty Kerberos Ticket"
                 usage
             fi
-            shift
             ;;
         --no-gather)
             NO_GATHER=true
             shift
+            ;;
+        --all)
+            ALL_FLAG=true
+            shift
+            ;;
+        --owned)
+            if [ -n "$2" ]; then
+                OWNED_FILE="$2"
+                shift 2
+            else
+                echo -e "[-] ERROR: Empty owned file provided"
+                usage
+            fi
             ;;
         -h|--help)
             usage
@@ -145,6 +166,26 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ---------- Validation logic ----------
+
+# Validate --all and --owned mutual exclusivity
+if [ "$ALL_FLAG" = true ] && [ -n "$OWNED_FILE" ]; then
+    echo "[-] ERROR: Cannot use both --all and --owned flags together"
+    usage
+    exit 1
+fi
+
+if [ "$ALL_FLAG" = false ] && [ -z "$OWNED_FILE" ]; then
+    echo "[-] ERROR: You must specify either --all or --owned <file>"
+    usage
+    exit 1
+fi
+
+# Validate owned file exists and is readable
+if [ -n "$OWNED_FILE" ] && [ ! -r "$OWNED_FILE" ]; then
+    echo "[-] ERROR: Owned file '$OWNED_FILE' does not exist or is not readable"
+    exit 1
+fi
+
 if $NO_GATHER; then
     # --no-gather mode validation
     if [ -n "$USERNAME" ]; then
@@ -171,7 +212,6 @@ else
         fi
     fi
 fi
-
 
 keep_shortest_chains() {
     local input_file="$1"
@@ -548,7 +588,13 @@ bhcli stats -d $domain
 
 # Launch DACL Query
 show_color_legend
-DACL_JSON=$(curl -s "$BH_URL/api/v2/graphs/cypher" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"query\":\"MATCH p=shortestPath((s)-[:Owns|GenericAll|WriteGPLink|MemberOf|GPOAppliesTo|GenericWrite|WriteOwner|WriteDacl|ForceChangePassword|AllExtendedRights|AddMember|HasSession|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions*1..]->(t)) \\nWHERE NOT COALESCE(s.system_tags, '') CONTAINS 'admin_tier_0' and (s:User or s:Computer) and (t:User or t:Computer or (t:Group and not t.objectid =~ '.*-(581|578|568|554|498|558|552|521|553|557|561|513|582|579|575|571|559|577|576|517|1102|522|569|574|545|515|572|560|556)$' and not t.distinguishedname =~ '.*EXCHANGE INSTALL DOMAIN.*') or t:OU or t:Domain) and not (t.distinguishedname =~ '.*(EXCHANGE ONLINE-APPLICATION|GUEST|DEFAULTACCOUNT|SYSTEMMAILBOX|DISCOVERYSEARCHMAILBOX|FEDERATEDEMAIL|HEALTHMAILBOX|MIGRATION).*') \\nAND s<>t AND s.domain = \\\"${flt_domain}\\\"\\nRETURN p\"}")
+if $ALL_FLAG; then
+    DACL_JSON=$(curl -s "$BH_URL/api/v2/graphs/cypher" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"query\":\"MATCH p=shortestPath((s)-[:Owns|GenericAll|WriteGPLink|MemberOf|GPOAppliesTo|GenericWrite|WriteOwner|WriteDacl|ForceChangePassword|AllExtendedRights|AddMember|HasSession|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions*1..]->(t)) \\nWHERE NOT COALESCE(s.system_tags, '') CONTAINS 'admin_tier_0' AND s.domain = '$ and (s:User or s:Computer) and (t:User or t:Computer or (t:Group and not t.objectid =~ '.*-(581|578|568|554|498|558|552|521|553|557|561|513|582|579|575|571|559|577|576|517|1102|522|569|574|545|515|572|560|556)$' and not t.distinguishedname =~ '.*EXCHANGE INSTALL DOMAIN.*') or t:OU or t:Domain) and not (t.distinguishedname =~ '.*(EXCHANGE ONLINE-APPLICATION|GUEST|DEFAULTACCOUNT|SYSTEMMAILBOX|DISCOVERYSEARCHMAILBOX|FEDERATEDEMAIL|HEALTHMAILBOX|MIGRATION).*') \\nAND s<>t AND s.domain = \\\"${flt_domain}\\\"\\nRETURN p\"}")
+else
+    bhcli mark owned --file "$OWNED_FILE" >/dev/tty
+    DACL_JSON=$(curl -s "$BH_URL/api/v2/graphs/cypher" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"query\":\"MATCH p=shortestPath((s)-[:Owns|GenericAll|WriteGPLink|MemberOf|GPOAppliesTo|GenericWrite|WriteOwner|WriteDacl|ForceChangePassword|AllExtendedRights|AddMember|HasSession|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions*1..]->(t)) \\nWHERE NOT COALESCE(s.system_tags, '') CONTAINS 'admin_tier_0' AND s.domain = '$ and (s:User or s:Computer) and (t:User or t:Computer or (t:Group and not t.objectid =~ '.*-(581|578|568|554|498|558|552|521|553|557|561|513|582|579|575|571|559|577|576|517|1102|522|569|574|545|515|572|560|556)$' and not t.distinguishedname =~ '.*EXCHANGE INSTALL DOMAIN.*') or t:OU or t:Domain) and not (t.distinguishedname =~ '.*(EXCHANGE ONLINE-APPLICATION|GUEST|DEFAULTACCOUNT|SYSTEMMAILBOX|DISCOVERYSEARCHMAILBOX|FEDERATEDEMAIL|HEALTHMAILBOX|MIGRATION).*') \\nAND s<>t AND ANY(tag IN s.system_tags WHERE tag = 'owned') AND s.domain = \\\"${flt_domain}\\\"\\nRETURN p\"}")
+fi
+
 DACL=$(echo "$DACL_JSON" | jq -r '
   .data as $data |
   $data.edges[] |
