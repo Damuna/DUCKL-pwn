@@ -1,4 +1,18 @@
 #!/bin/bash
+
+# Define colors (non-bold versions)
+WHITE='\033[0;37m'      # Abuse type
+GREEN='\033[0;32m'      # Users
+PURPLE='\033[0;35m'     # Computers
+ORANGE='\033[0;33m'     # Groups
+BLUE='\033[0;34m'       # OU
+LIGHT_BLUE='\033[0;36m' # Domain
+YELLOW='\033[1;33m'     # Messages
+RED='\033[;91m'         # GPO
+MAGENTA='\033[0;95m'    # GPOs (Light Magenta)
+NC='\033[0m'            # No Color
+BOLD='\033[1m'
+
  echo "============================================================="
   echo "   ____  _     ____  _  __ _           ____  _      _     "
   echo "  /  _ \/ \ /\/   _\/ |/ // \         /  __\/ \  /|/ \  /|"
@@ -512,18 +526,6 @@ if [[ $NO_GATHER == false ]]; then
     fi
 fi
 
-# Define colors (non-bold versions)
-WHITE='\033[0;37m'      # Abuse type
-GREEN='\033[0;32m'      # Users
-PURPLE='\033[0;35m'     # Computers
-ORANGE='\033[0;33m'     # Groups
-BLUE='\033[0;34m'       # OU
-LIGHT_BLUE='\033[0;36m' # Domain
-YELLOW='\033[1;33m'     # Messages
-RED='\033[;91m'         # GPO
-MAGENTA='\033[0;95m'    # GPOs (Light Magenta)
-NC='\033[0m'            # No Color
-BOLD='\033[1m'
 
 show_color_legend() {
     echo -e "\n${BOLD}LEGEND:${NC}"

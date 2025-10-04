@@ -17,6 +17,7 @@ jgs~^~^`---'~^~^~^`---'~^~^~^`---'~^~^~^`---'~^~^~^`---'~^~^~
 ===============================================================
 ```
 ## Requirements
+- Bloodhound community Edition
 - [bhcli](https://github.com/exploide/bhcli)
 - [targetedKerberoast](https://github.com/ShutdownRepo/targetedKerberoast) — optional, used for certain automated actions
 - [pyGPOAbuse](https://github.com/Hackndo/pyGPOAbuse) — optional, used for certain automated actions
