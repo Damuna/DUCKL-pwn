@@ -54,13 +54,16 @@ echo "  ducklpwn -dc corp.local --dc-ip 10.0.0.5 --no-gather"
   exit 0
 }
 
-# Load configuration .env environment
-set -eu
-if [ -f .env ]; then
-  # shellcheck disable=SC1090
-  . .env
-fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="$SCRIPT_DIR/.env"
 
+if [ -f "$ENV_FILE" ]; then
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  echo "[+] Loaded .env configuration from $ENV_FILE"
+else
+  echo "[-] Warning: .env file not found at $ENV_FILE"
+fi
 
 USERNAME=""
 PASSWORD=""
