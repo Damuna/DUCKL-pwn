@@ -45,7 +45,7 @@ Flags:
 - `-k`
   Kerberos Ticket path of the LDAP to perform Bloodhound collection.
 - `--all`                
-  Build attack chains for all possible users in the domain
+  Build attack chains for all possible users in the domain. NOT recommended for large domains.
 - `--owned <FILE>`       
   Build attack chains for owned users listed in the specified file (Specify UPN for users and FQDN for PCs)
 - `--help or -h`
