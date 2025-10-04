@@ -493,7 +493,7 @@ fi
 stat=$(curl -s -o /dev/null -w "%{http_code}" $BH_URL/api/v2/login)
 if [[ $stat != "405" ]]; then
     echo -e "\n---------STARTING BLOODHOUND API--------------"
-    /home/kali/TOOLS/bloodhound-cli containers start
+    $bd_cli containers start
 fi
 
 # Authenticates to the BH API if not previously authenticated

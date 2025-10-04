@@ -24,7 +24,7 @@ jgs~^~^`---'~^~^~^`---'~^~^~^`---'~^~^~^`---'~^~^~^`---'~^~^~
 ## Configuration
 Copy the example config file `.env.example` into `.env` and edit locally
 ```sh
-chmod +x ducklpwn.sh; cp .env.example .env
+chmod +x ducklpwn.sh; cp .env.example .env; nano .env
 ```
 ## Usage 
 Flags:
