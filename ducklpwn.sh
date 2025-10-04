@@ -43,7 +43,8 @@ usage(){
   echo "  -H <HASH>            NTLM/LM hash for the user"
   echo "  -k <TICKET_PATH>     Path to a Kerberos ticket file to use for authentication"
   echo "  --all                Build attack chains for all possible users in the domain"
-  echo "  --owned <FILE>       Build attack chains for owned users listed in the specified file (UPN for users and FQDN for PCs)"
+  echo "  --owned <FILE>       Build attack chains for owned users listed in the specified file"
+  echo "                           (Specify UPN for users and FQDN for PCs)"
   echo "  -h, --help           Show this help text and exit"
 
   echo -e "\nEXAMPLES"
