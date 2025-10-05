@@ -44,7 +44,7 @@ usage(){
   echo "  -k <TICKET_PATH>     Path to a Kerberos ticket file to use for authentication"
   echo "  --all                Build attack chains for all possible users in the domain"
   echo "                           (NOT recommended for large domains.)"
-  echo "  --owned <FILE>       Build attack chains for owned users listed in the specified file"
+  echo "  --owned {<FILE>}     Build attack chains for owned users (manually added in Bloodhound or listed in the specified file)"
   echo "                           (Specify UPN for users and FQDN for PCs)"
   echo "  -h, --help           Show this help text and exit"
 
@@ -82,6 +82,7 @@ NO_GATHER=false
 DC_FQDN=""
 DC_IP=""
 ALL_FLAG=false
+OWNED_FLAG=false
 OWNED_FILE=""
 
 # Parse command-line arguments
@@ -150,12 +151,13 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --owned)
+            OWNED_FLAG=true
             if [ -n "$2" ]; then
                 OWNED_FILE="$2"
                 shift 2
             else
-                echo -e "[-] ERROR: Empty owned file provided"
-                usage
+                echo -e "${YELLOW}[*] Have you manually marked the users as owned on Bloodhound? Otherwise input a file${NC}"
+                shift 1
             fi
             ;;
         -h|--help)
@@ -176,15 +178,9 @@ if [ "$ALL_FLAG" = true ] && [ -n "$OWNED_FILE" ]; then
     exit 1
 fi
 
-if [ "$ALL_FLAG" = false ] && [ -z "$OWNED_FILE" ]; then
-    echo "[-] ERROR: You must specify either --all or --owned <file>"
+if [ "$ALL_FLAG" = false ] && [ "$OWNED_FLAG" = false ]; then
+    echo "[-] ERROR: You must specify either --all or --owned (with or without file)"
     usage
-    exit 1
-fi
-
-# Validate owned file exists and is readable
-if [ -n "$OWNED_FILE" ] && [ ! -r "$OWNED_FILE" ]; then
-    echo "[-] ERROR: Owned file '$OWNED_FILE' does not exist or is not readable"
     exit 1
 fi
 
@@ -593,8 +589,10 @@ show_color_legend
 if $ALL_FLAG; then
     DACL_JSON=$(curl -s "$BH_URL/api/v2/graphs/cypher" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"query\":\"MATCH p=shortestPath((s)-[:Owns|GenericAll|WriteGPLink|MemberOf|GPOAppliesTo|GenericWrite|WriteOwner|WriteDacl|ForceChangePassword|AllExtendedRights|AddMember|HasSession|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions*1..]->(t)) \\nWHERE NOT COALESCE(s.system_tags, '') CONTAINS 'admin_tier_0' AND s.domain = '$ and (s:User or s:Computer) and (t:User or t:Computer or (t:Group and not t.objectid =~ '.*-(581|578|568|554|498|558|552|521|553|557|561|513|582|579|575|571|559|577|576|517|1102|522|569|574|545|515|572|560|556)$' and not t.distinguishedname =~ '.*EXCHANGE INSTALL DOMAIN.*') or t:OU or t:Domain) and not (t.distinguishedname =~ '.*(EXCHANGE ONLINE-APPLICATION|GUEST|DEFAULTACCOUNT|SYSTEMMAILBOX|DISCOVERYSEARCHMAILBOX|FEDERATEDEMAIL|HEALTHMAILBOX|MIGRATION).*') \\nAND s<>t AND s.domain = \\\"${flt_domain}\\\"\\nRETURN p\"}")
 else
-    bhcli mark owned --file "$OWNED_FILE" | grep -v 'already marked as owned'
-    DACL_JSON=$(curl -s "$BH_URL/api/v2/graphs/cypher" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"query\":\"MATCH p=shortestPath((s)-[:Owns|GenericAll|WriteOwner|WriteDacl|MemberOf|ForceChangePassword|AllExtendedRights|AddMember|HasSession|AdminTo|DCSync|WriteSPN|AddKeyCredentialLink*1..5]->(t)) WHERE (s:User OR s:Computer) AND (t:User OR t:Computer OR t:Domain OR t:GPO OR t:OU) AND s<>t AND ANY(tag IN s.system_tags WHERE tag = 'owned') AND s.domain = \\\"${flt_domain}\\\" RETURN p LIMIT 500\"}")
+    if [[ -n "$OWNED_FILE" ]]; then
+        bhcli mark owned --file "$OWNED_FILE" | grep -v 'already marked as owned'
+    fi
+    DACL_JSON=$(curl -s "$BH_URL/api/v2/graphs/cypher" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"query\":\"MATCH p=shortestPath((s)-[:Owns|GenericAll|GenericWrite|WriteOwner|WriteDacl|MemberOf|ForceChangePassword|AllExtendedRights|AddMember|HasSession|GPLink|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|HasSIDHistory|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions|WriteGPLink|GoldenCert|ADCSESC1|ADCSESC3|ADCSESC4|ADCSESC6a|ADCSESC6b|ADCSESC9a|ADCSESC9b|ADCSESC10a|ADCSESC10b|ADCSESC13|SyncedToEntraUser|CoerceAndRelayNTLMToSMB|CoerceAndRelayNTLMToADCS|WriteOwnerLimitedRights|OwnsLimitedRights|ClaimSpecialIdentity|CoerceAndRelayNTLMToLDAP|CoerceAndRelayNTLMToLDAPS|ContainsIdentity|PropagatesACEsTo|CanApplyGPO|HasTrustKeys|ManageCA|ManageCertificates|DCFor|SameForestTrust|SpoofSIDHistory|AbuseTGTDelegation*1..10]->(t)) WHERE (s:User OR s:Computer) AND (t:User OR t:Computer OR t:Domain OR t:GPO OR t:OU) AND s<>t AND ANY(tag IN s.system_tags WHERE tag = 'owned') AND s.domain = \\\"${flt_domain}\\\" RETURN p LIMIT 1000\"}")
 fi
 
 DACL=$(echo "$DACL_JSON" | jq -r '
