@@ -28,39 +28,49 @@ BOLD='\033[1m'
   echo "  ~^~^\`---'~^~^~^\`---'~^~^~^\`---'~^~^~^\`---'~^~^~^\`---'~^~^~"
   echo "============================================================="
   echo ""
+
 usage(){
-  echo "USAGE"
-  echo "  ./ducklpwn.sh [options]"
+  echo -e "\n${BOLD}USAGE${NC}"
+  echo -e "  ${YELLOW}./ducklpwn.sh [options]${NC}"
   echo ""
-  echo "DESCRIPTION"
-  echo "  Generates Bloodhound chains and exploits them automatically."
+  echo -e "${BOLD}DESCRIPTION${NC}"
+  echo -e "  Generates Bloodhound chains and exploits them automatically."
+  echo ""
 
-  echo -e "\nFLAGS"
-  echo "  -dc <DC_FQDN>        Domain Controller fully-qualified domain name (target scope for analysis)"
-  echo "  --dc-ip <DC_IP>      IP address of the name server or target host"
-  echo "  --no-gather          Skip collection; run analysis/automation on previously gathered/imported data"
-  echo "  -u <USER>            Username used for LDAP collection"
-  echo "  -p <PASSWORD>        Password for the user"
-  echo "  -H <HASH>            NTLM/LM hash for the user"
-  echo "  -k <TICKET_PATH>     Path to a Kerberos ticket file to use for authentication"
-  echo "  --all                Build attack chains for all possible users in the domain"
-  echo "                           (NOT recommended for large domains.)"
-  echo "  --owned {<FILE>}     Build attack chains for owned users (manually added in Bloodhound or listed in the specified file)"
-  echo "                           (Specify UPN for users and FQDN for PCs)"
-  echo "  -h, --help           Show this help text and exit"
+  echo -e "${BOLD}FLAGS${NC}"
+  echo -e "  ${GREEN}-dc <DC_FQDN>${NC}        Domain Controller fully-qualified domain name (target scope for analysis)"
+  echo -e "  ${GREEN}--dc-ip <DC_IP>${NC}      IP address of the name server or target host"
+  echo -e "  ${GREEN}--no-gather${NC}          Skip collection; run analysis/automation on previously gathered/imported data"
+  echo -e "  ${GREEN}-u <USER>${NC}            Username used for LDAP collection"
+  echo -e "  ${GREEN}-p <PASSWORD>${NC}        Password for the user"
+  echo -e "  ${GREEN}-H <HASH>${NC}            NTLM/LM hash for the user"
+  echo -e "  ${GREEN}-k <TICKET_PATH>${NC}     Path to a Kerberos ticket file to use for authentication"
+  echo -e "  ${GREEN}--all${NC}                Build attack chains for all possible users in the domain"
+  echo -e "                           ${GRAY}(NOT recommended for large domains.)${NC}"
+  echo -e "  ${GREEN}--owned <FILE>${NC}       Build attack chains for owned users listed in the specified file"
+  echo -e "                           ${GRAY}(Specify UPN for users and FQDN for PCs)${NC}"
+  echo -e "  ${GREEN}--owned${NC}              Build attack chains for users previously marked as owned in BloodHound"
+  echo -e "  ${GREEN}-h, --help${NC}           Show this help text and exit"
+  echo ""
 
-  echo -e "\nEXAMPLES"
-  echo "  # Collect and ingest BloodHound data then run analysis for all users"
-  echo "  ducklpwn -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5 --all"
+  echo -e "${BOLD}EXAMPLES${NC}"
+  echo -e "  ${GRAY}# Collect and ingest BloodHound data then run analysis for all users${NC}"
+  echo -e "  ${YELLOW}ducklpwn -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5 --all${NC}"
   
-  echo "  # Collect and run analysis for specific owned users"
-  echo "  ducklpwn -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5 --owned owned.txt"
+  echo -e "  ${GRAY}# Collect and run analysis for specific owned users from file${NC}"
+  echo -e "  ${YELLOW}ducklpwn -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5 --owned owned.txt${NC}"
   
-  echo "  # Run analysis using previously gathered data for all users"
-  echo "  ducklpwn -dc corp.local --dc-ip 10.0.0.5 --no-gather --all"
+  echo -e "  ${GRAY}# Collect and run analysis for users previously marked as owned in BloodHound${NC}"
+  echo -e "  ${YELLOW}ducklpwn -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5 --owned${NC}"
   
-  echo "  # Run analysis using previously gathered data for owned users"
-  echo "  ducklpwn -dc corp.local --dc-ip 10.0.0.5 --no-gather --owned owned.txt"
+  echo -e "  ${GRAY}# Run analysis using previously gathered data for all users${NC}"
+  echo -e "  ${YELLOW}ducklpwn -dc corp.local --dc-ip 10.0.0.5 --no-gather --all${NC}"
+  
+  echo -e "  ${GRAY}# Run analysis using previously gathered data for owned users${NC}"
+  echo -e "  ${YELLOW}ducklpwn -dc corp.local --dc-ip 10.0.0.5 --no-gather --owned owned.txt${NC}"
+  
+  echo -e "  ${GRAY}# Run analysis using previously gathered data for BloodHound marked owned users${NC}"
+  echo -e "  ${YELLOW}ducklpwn -dc corp.local --dc-ip 10.0.0.5 --no-gather --owned${NC}"
 
   exit 0
 }
@@ -71,9 +81,9 @@ ENV_FILE="$SCRIPT_DIR/.env"
 if [ -f "$ENV_FILE" ]; then
   # shellcheck disable=SC1090
   . "$ENV_FILE"
-  echo "[+] Loaded .env configuration from $ENV_FILE"
+  echo -e "[+] Loaded .env configuration from $ENV_FILE"
 else
-  echo "[-] Warning: .env file not found at $ENV_FILE"
+  echo -e "[-] Warning: .env file not found at $ENV_FILE"
 fi
 USERNAME=""
 PASSWORD=""
@@ -100,7 +110,7 @@ while [[ $# -gt 0 ]]; do
                 USERNAME="$2"
                 shift 2
             else
-                echo -e "[-] ERROR: Empty User Provided"
+                echo -e "${RED}[-] ERROR: Empty User Provided${NC}"
                 usage
             fi
             ;;
@@ -109,7 +119,7 @@ while [[ $# -gt 0 ]]; do
                 DC_FQDN="$2"
                 shift 2
             else
-                echo -e "[-] ERROR: Empty DC FQDN Provided"
+                echo -e "${RED}[-] ERROR: Empty DC FQDN Provided${NC}"
                 usage
             fi
             ;;
@@ -118,7 +128,7 @@ while [[ $# -gt 0 ]]; do
                 DC_IP="$2"
                 shift 2
             else
-                echo -e "[-] ERROR: Empty DC IP Provided"
+                echo -e "${RED}[-] ERROR: Empty DC IP Provided${NC}"
                 usage
             fi
             ;;
@@ -127,7 +137,7 @@ while [[ $# -gt 0 ]]; do
                 PASSWORD="$2"
                 shift 2
             else
-                echo -e "[-] ERROR: Empty Password Provided"
+                echo -e "${RED}[-] ERROR: Empty Password Provided${NC}"
                 usage
             fi
             ;;
@@ -136,7 +146,7 @@ while [[ $# -gt 0 ]]; do
                 HASH="$2"
                 shift 2
             else
-                echo -e "[-] ERROR: Empty Hash Provided"
+                echo -e "${RED}[-] ERROR: Empty Hash Provided${NC}"
                 usage
             fi
             ;;
@@ -145,7 +155,7 @@ while [[ $# -gt 0 ]]; do
                 KB="$2"
                 shift 2
             else
-                echo -e "[-] ERROR: Empty Kerberos Ticket"
+                echo -e "${RED}[-] ERROR: Empty Kerberos Ticket${NC}"
                 usage
             fi
             ;;
@@ -180,13 +190,13 @@ done
 
 # Validate --all and --owned mutual exclusivity
 if [ "$ALL_FLAG" = true ] && [ -n "$OWNED_FILE" ]; then
-    echo "[-] ERROR: Cannot use both --all and --owned flags together"
+    echo -e "${RED}[-] ERROR: Cannot use both --all and --owned flags together${NC}"
     usage
     exit 1
 fi
 
 if [ "$ALL_FLAG" = false ] && [ "$OWNED_FLAG" = false ]; then
-    echo "[-] ERROR: You must specify either --all or --owned (with or without file)"
+    echo -e "${RED}[-] ERROR: You must specify either --all or --owned (with or without file)${NC}"
     usage
     exit 1
 fi
@@ -194,24 +204,24 @@ fi
 if $NO_GATHER; then
     # --no-gather mode validation
     if [ -n "$USERNAME" ]; then
-        echo "[-] ERROR: --no-gather cannot be used with -u/--username"
+        echo -e "${RED}[-] ERROR: --no-gather cannot be used with -u/--username${NC}"
         usage
         exit 1
     fi
     if [ -z "$DC_FQDN" ] || [ -z "$DC_IP" ]; then
-        echo "[-] ERROR: --no-gather requires both -dc and --dc-ip"
+        echo -e "${RED}[-] ERROR: --no-gather requires both -dc and --dc-ip${NC}"
         usage
         exit 1
     fi
 else
     # Normal operation mode validation
     if [ -z "$USERNAME" ] || [ -z "$DC_FQDN" ] || [ -z "$DC_IP" ]; then
-        echo "[-] ERROR: You must provide -u, -dc, and --dc-ip when gathering"
+        echo -e "${RED}[-] ERROR: You must provide -u, -dc, and --dc-ip when gathering${NC}"
         usage
         exit 1
     else
         if [ -z "$PASSWORD" ] && [ -z "$HASH" ] && [ ! -s "$KB" ]; then
-            echo "[-] ERROR: You must provide at least one of -p (password), -H (hash), or -k (kerberos)"
+            echo -e "${RED}[-] ERROR: You must provide at least one of -p (password), -H (hash), or -k (kerberos)${NC}"
             usage
             exit 1
         fi
@@ -346,7 +356,7 @@ parallel_process_chains() {
     # Cleanup
     rm "${input_file}.part."*
     
-    echo "${input_file%.*}_parallel.chains"
+    echo -e "${input_file%.*}_parallel.chains"
 }
 
 colorize_kind() {
@@ -358,7 +368,7 @@ colorize_kind() {
         "Domain") echo -e "${LIGHT_BLUE}(${kind})${NC}" ;;
         "OU") echo -e "${BLUE}(${kind})${NC}" ;;
         "GPO") echo -e "${RED}${label}${NC}" ;;
-        *) echo "(${kind})" ;;  # Default no color for other types
+        *) echo -e "(${kind})" ;;  # Default no color for other types
     esac
 }
 
@@ -372,7 +382,7 @@ colorize_label() {
         "Domain") echo -e "${LIGHT_BLUE}${label}${NC}" ;;
         "OU") echo -e "${BLUE}${label}${NC}" ;;
         "GPO") echo -e "${MAGENTA}${label}${NC}" ;;
-        *) echo "${label}" ;;  # Default no color for other types
+        *) echo -e "${label}" ;;  # Default no color for other types
     esac
 }
 
@@ -385,8 +395,8 @@ align_ad_relationships() {
     max_op_len=0
     while IFS= read -r line; do
         # Extract components
-        source_part=$(echo "$line" | awk -F'---' '{print $1}' | sed 's/ *$//')
-        op_part=$(echo "$line" | awk -F'---|-->' '{print $2}' | sed 's/ *$//')
+        source_part=$(echo -e "$line" | awk -F'---' '{print $1}' | sed 's/ *$//')
+        op_part=$(echo -e "$line" | awk -F'---|-->' '{print $2}' | sed 's/ *$//')
         
         # Update maximum lengths
         (( ${#source_part} > max_source_len )) && max_source_len=${#source_part}
@@ -395,9 +405,9 @@ align_ad_relationships() {
 
     # Generate aligned output
     while IFS= read -r line; do
-        source_part=$(echo "$line" | awk -F'---' '{print $1}' | sed 's/ *$//')
-        op_part=$(echo "$line" | awk -F'---|-->' '{print $2}' | sed 's/ *$//')
-        target_part=$(echo "$line" | awk -F'--> ' '{print $2}')
+        source_part=$(echo -e "$line" | awk -F'---' '{print $1}' | sed 's/ *$//')
+        op_part=$(echo -e "$line" | awk -F'---|-->' '{print $2}' | sed 's/ *$//')
+        target_part=$(echo -e "$line" | awk -F'--> ' '{print $2}')
         
         printf "%-*s---%-*s--> %s\n" \
             "$max_source_len" "$source_part" \
@@ -464,17 +474,17 @@ get_ticket() {
     done
 
     if [[ -z "$DC_FQDN" || -z "$USERNAME" ]]; then
-        echo "Usage: get_ticket DC_FQDN -u USERNAME [-p PASSWORD | -H HASH]"
+        echo -e "Usage: get_ticket DC_FQDN -u USERNAME [-p PASSWORD | -H HASH]"
         return 1
     fi
 
     if [[ -n "$PASSWORD" && -n "$HASH" ]]; then
-        echo "[-] ERROR: Cannot specify both password and hash"
+        echo -e "${RED}[-] ERROR: Cannot specify both password and hash${NC}"
         return 1
     fi
 
     if [[ -z "$PASSWORD" && -z "$HASH" ]]; then
-        echo "[-] ERROR: Must specify either password or hash"
+        echo -e "${RED}[-] ERROR: Must specify either password or hash${NC}"
         return 1
     fi
 
@@ -570,7 +580,7 @@ TOKEN=$(curl -s -X POST \
 
 # Check if token retrieval was successful
 if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
-    echo "[-] ERROR: Failed to get authentication token, invalid credentials or Bloodhound not running"
+    echo -e "[-] ERROR: Failed to get authentication token, invalid credentials or Bloodhound not running"
     exit 1
 fi
 
