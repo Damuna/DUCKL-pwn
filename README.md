@@ -54,27 +54,27 @@ Flags:
 #### With data collection
   Collect and ingest BloodHound data then run analysis for all users (NOT recommended for large domains.)
   ```sh
-  ducklpwn -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5 --all
+  ./ducklpwn.sh -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5 --all
   ```
   Collect and run analysis for specific owned users and mark them as owned
   ```sh
-  ducklpwn -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5 --owned owned.txt
+  ./ducklpwn.sh -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5 --owned owned.txt
   ```
   Collect and run analysis for users _previously_ marked as owned (manually mark them)
   ```sh
-  ducklpwn -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5 --owned
+  ./ducklpwn.sh -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5 --owned
   ```
 #### Without data collection
   Run analysis using previously gathered data for all users
   ```sh
-  ducklpwn -dc corp.local --dc-ip 10.0.0.5 --no-gather --all
+  ./ducklpwn.sh -dc corp.local --dc-ip 10.0.0.5 --no-gather --all
   ```
   Run analysis using previously gathered data for specific owned users and mark them as owned
   ```sh
-  ducklpwn -dc corp.local --dc-ip 10.0.0.5 --no-gather --owned owned.txt
+  ./ducklpwn.sh -dc corp.local --dc-ip 10.0.0.5 --no-gather --owned owned.txt
   ```
   Run analysis for users _previously_ marked as owned (manually mark them)
   ```sh
-  ducklpwn -dc corp.local --dc-ip 10.0.0.5 --no-gather --owned
+  ./ducklpwn.sh -dc corp.local --dc-ip 10.0.0.5 --no-gather --owned
   ```
 

