@@ -1,5 +1,5 @@
 # DUCKL-pwn
-```
+```sh
 ===============================================================
    ____  _     ____  _  __ _           ____  _      _     
   /  _ \/ \ /\/   _\/ |/ // \         /  __\/ \  /|/ \  /|
@@ -43,19 +43,38 @@ Flags:
 - `-H [HASH]`
   Hash of the LDAP to perform Bloodhound collection.
 - `-k`
-  Kerberos Ticket path of the LDAP to perform Bloodhound collection.
+  Kerberos Ticket path of the LDAP to perform Bloodhound collection. 
 - `--all`                
-  Build attack chains for all possible users in the domain
-- `--owned <FILE>`       
-  Build attack chains for owned users listed in the specified file (Specify UPN for users and FQDN for PCs)
+  Build attack chains for all possible users in the domain (NOT recommended for large domains.)
+- `--owned {<FILE>}`       
+  Build attack chains for users that are marked as owned in Bloodhound. If a file is specified, account are automatically marked as owned (Specify UPN for users and FQDN for PCs)
 - `--help or -h`
   Show usage/help text.
 ### Example usage
-To automatically collect and ingest Bloodhound data
-```sh
-./ducklpwn.sh -u [USER] [-p PASSWORD] -dc [DC_FQDN] --dc-ip [DC_IP] 
-```
-If Bloodhound data are already uploaded
-```sh
-./ducklpwn.sh -dc [DC_FQDN] --dc-ip [DC_IP] --no-gather
-```
+#### With data collection
+  Collect and ingest BloodHound data then run analysis for all users (NOT recommended for large domains.)
+  ```sh
+  ducklpwn -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5 --all
+  ```
+  Collect and run analysis for specific owned users and mark them as owned
+  ```sh
+  ducklpwn -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5 --owned owned.txt
+  ```
+  Collect and run analysis for users _previously_ marked as owned (manually mark them)
+  ```sh
+  ducklpwn -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5 --owned
+  ```
+#### Without data collection
+  Run analysis using previously gathered data for all users
+  ```sh
+  ducklpwn -dc corp.local --dc-ip 10.0.0.5 --no-gather --all
+  ```
+  Run analysis using previously gathered data for specific owned users and mark them as owned
+  ```sh
+  ducklpwn -dc corp.local --dc-ip 10.0.0.5 --no-gather --owned owned.txt
+  ```
+  Run analysis for users _previously_ marked as owned (manually mark them)
+  ```sh
+  ducklpwn -dc corp.local --dc-ip 10.0.0.5 --no-gather --owned
+  ```
+
