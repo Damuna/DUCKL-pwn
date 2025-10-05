@@ -36,8 +36,8 @@ Flags:
   Build attack chains for users that are marked as owned in Bloodhound. If a file is specified, account are automatically marked as owned (Specify UPN for users and FQDN for PCs)
 - `--help or -h`
   Show usage/help text.
-### Example usage
-#### With data collection
+## Examples
+### With data collection
   Collect and ingest BloodHound data then run analysis for all users (NOT recommended for large domains.)
   ```sh
   ./ducklpwn.sh -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5 --all
@@ -50,7 +50,7 @@ Flags:
   ```sh
   ./ducklpwn.sh -u alice -p 's3cr3t' -dc corp.local --dc-ip 10.0.0.5 --owned
   ```
-#### Without data collection
+### Without data collection
   Run analysis using previously gathered data for all users
   ```sh
   ./ducklpwn.sh -dc corp.local --dc-ip 10.0.0.5 --no-gather --all
