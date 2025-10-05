@@ -15,11 +15,11 @@ BOLD='\033[1m'
 
   echo "============================================================="
   echo "   ____  _     ____  _  __ _           ____  _      _     "
-  echo "  /  _ \/ \ /\/   _\/ |/ // \         /  __\/ \  /|/ \  /|"
-  echo "  | | \|| | |||  /  |   / | |   _____ |  \/|| |  ||| |\ ||"
+  echo "  /  _ \/ \ /\/   _\/ |/ // \        /  __\/ \  /|/ \  /|"
+  echo "  | | \|| | |||  /  |   / | |   ____ |  \/|| |  ||| |\ ||"
   echo "  | |_/|| \_/||  \__|   \ | |_/\\____\|  __/| |/\||| | \||"
   echo "  \____/\____/\____/\_|\_\\____/      \_/   \_/  \|\_/  \|"
-  echo "                                                        "
+  echo "                                                          "
   echo "  > Exploiting DACLs like a quacking pro!"
   echo "      _          _          _          _          _"
   echo "    >(')____,  >(')____,  >(')____,  >(')____,  >(') ____,"
@@ -43,6 +43,7 @@ usage(){
   echo "  -H <HASH>            NTLM/LM hash for the user"
   echo "  -k <TICKET_PATH>     Path to a Kerberos ticket file to use for authentication"
   echo "  --all                Build attack chains for all possible users in the domain"
+  echo "                           (NOT recommended for large domains.)"
   echo "  --owned <FILE>       Build attack chains for owned users listed in the specified file"
   echo "                           (Specify UPN for users and FQDN for PCs)"
   echo "  -h, --help           Show this help text and exit"
@@ -551,7 +552,7 @@ TOKEN=$(curl -s -X POST \
 
 # Check if token retrieval was successful
 if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
-    echo "[-] ERROR: Failed to get authentication token, invalid credentials"
+    echo "[-] ERROR: Failed to get authentication token, invalid credentials or Bloodhound not running"
     exit 1
 fi
 
@@ -592,8 +593,8 @@ show_color_legend
 if $ALL_FLAG; then
     DACL_JSON=$(curl -s "$BH_URL/api/v2/graphs/cypher" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"query\":\"MATCH p=shortestPath((s)-[:Owns|GenericAll|WriteGPLink|MemberOf|GPOAppliesTo|GenericWrite|WriteOwner|WriteDacl|ForceChangePassword|AllExtendedRights|AddMember|HasSession|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions*1..]->(t)) \\nWHERE NOT COALESCE(s.system_tags, '') CONTAINS 'admin_tier_0' AND s.domain = '$ and (s:User or s:Computer) and (t:User or t:Computer or (t:Group and not t.objectid =~ '.*-(581|578|568|554|498|558|552|521|553|557|561|513|582|579|575|571|559|577|576|517|1102|522|569|574|545|515|572|560|556)$' and not t.distinguishedname =~ '.*EXCHANGE INSTALL DOMAIN.*') or t:OU or t:Domain) and not (t.distinguishedname =~ '.*(EXCHANGE ONLINE-APPLICATION|GUEST|DEFAULTACCOUNT|SYSTEMMAILBOX|DISCOVERYSEARCHMAILBOX|FEDERATEDEMAIL|HEALTHMAILBOX|MIGRATION).*') \\nAND s<>t AND s.domain = \\\"${flt_domain}\\\"\\nRETURN p\"}")
 else
-    bhcli mark owned --file "$OWNED_FILE" >/dev/tty
-    DACL_JSON=$(curl -s "$BH_URL/api/v2/graphs/cypher" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"query\":\"MATCH p=shortestPath((s)-[:Owns|GenericAll|WriteGPLink|MemberOf|GPOAppliesTo|GenericWrite|WriteOwner|WriteDacl|ForceChangePassword|AllExtendedRights|AddMember|HasSession|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions*1..]->(t)) \\nWHERE NOT COALESCE(s.system_tags, '') CONTAINS 'admin_tier_0' AND s.domain = '$ and (s:User or s:Computer) and (t:User or t:Computer or (t:Group and not t.objectid =~ '.*-(581|578|568|554|498|558|552|521|553|557|561|513|582|579|575|571|559|577|576|517|1102|522|569|574|545|515|572|560|556)$' and not t.distinguishedname =~ '.*EXCHANGE INSTALL DOMAIN.*') or t:OU or t:Domain) and not (t.distinguishedname =~ '.*(EXCHANGE ONLINE-APPLICATION|GUEST|DEFAULTACCOUNT|SYSTEMMAILBOX|DISCOVERYSEARCHMAILBOX|FEDERATEDEMAIL|HEALTHMAILBOX|MIGRATION).*') \\nAND s<>t AND ANY(tag IN s.system_tags WHERE tag = 'owned') AND s.domain = \\\"${flt_domain}\\\"\\nRETURN p\"}")
+    bhcli mark owned --file "$OWNED_FILE" | grep -v 'already marked as owned'
+    DACL_JSON=$(curl -s "$BH_URL/api/v2/graphs/cypher" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"query\":\"MATCH p=shortestPath((s)-[:Owns|GenericAll|WriteOwner|WriteDacl|MemberOf|ForceChangePassword|AllExtendedRights|AddMember|HasSession|AdminTo|DCSync|WriteSPN|AddKeyCredentialLink*1..5]->(t)) WHERE (s:User OR s:Computer) AND (t:User OR t:Computer OR t:Domain OR t:GPO OR t:OU) AND s<>t AND ANY(tag IN s.system_tags WHERE tag = 'owned') AND s.domain = \\\"${flt_domain}\\\" RETURN p LIMIT 500\"}")
 fi
 
 DACL=$(echo "$DACL_JSON" | jq -r '
