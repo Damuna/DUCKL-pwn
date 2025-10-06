@@ -16,7 +16,7 @@ BOLD='\033[1m'
 
 cat << "EOF"
 =============================================================
-   ____  _     ____  _  __ _           ____  _      _     
+   ____  _     ____  _  __ _          ____  _      _     
   /  _ \/ \ /\/   _\/ |/ // \        /  __\/ \  /|/ \  /|
   | | \|| | |||  /  |   / | |   ____ |  \/|| |  ||| |\ ||
   | |_/|| \_/||  \__|   \ | |_/\____\|  __/| |/\||| | \||
@@ -82,7 +82,7 @@ ENV_FILE="$SCRIPT_DIR/.env"
 if [ -f "$ENV_FILE" ]; then
   # shellcheck disable=SC1090
   . "$ENV_FILE"
-  echo -e "[+] Loaded .env configuration from $ENV_FILE"
+  echo -e "${GRAY}[+] Loaded .env configuration from $ENV_FILE${NC}"
 else
   echo -e "[-] Warning: .env file not found at $ENV_FILE"
 fi
@@ -229,53 +229,20 @@ else
     fi
 fi
 
-keep_shortest_chains() {
-    local input_file="$1"
-    
-    awk '
-    {
-        # Extract start and end nodes efficiently
-        line = $0
-        gsub(/\033\[[0-9;]*[mGK]/, "")  # Remove colors for processing
-        
-        if (match(line, /(.*) ---[^>]*--> (.*)/)) {
-            start_node = substr(line, RSTART, RLENGTH)
-            end_node = substr(line, RSTART + length(start_node))
-            
-            # Count edges by counting "-->"
-            gsub(/[^-]*-[^>]*-->/, "|", line)  # Replace edges with pipes
-            edge_count = split(line, edges, "|") - 1
-            
-            key = start_node "|" end_node
-            
-            if (!(key in best_count) || edge_count < best_count[key]) {
-                best_line[key] = $0  # Keep original colored line
-                best_count[key] = edge_count
-                line_order[key] = NR
-            }
-        }
-    }
-    END {
-        # Output in order of first appearance
-        for (key in line_order) {
-            print line_order[key] "\t" best_line[key]
-        }
-    }
-    ' "$input_file" | sort -n -k1,1 | cut -f2-
-}
-
 make_chains() {
     local input_file="$1"
     
-    # Use awk for much faster graph processing - NO COLOR VERSION
     awk '
     {
+        # Remove domain suffixes for processing
+        gsub(/@[^[:space:]]+/, "", $0)
+        
         # Parse line: source ---edge_type--> target
         if (match($0, /(.*) ---(.*)--> (.*)/)) {
-            source = substr($0, RSTART, RLENGTH)
-            source_clean = substr($0, RSTART, RLENGTH)
+            source_node = substr($0, RSTART, RLENGTH)
+            source_clean = source_node
             
-            # Extract components
+            # Extract components using field splitting
             split($0, parts, " ---")
             source_node = parts[1]
             rest = parts[2]
@@ -285,24 +252,42 @@ make_chains() {
             target_node = edge_parts[2]
             
             # Clean up whitespace
-            gsub(/[[:space:]]+$/, "", source_node)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", source_node)
             gsub(/^[[:space:]]+|[[:space:]]+$/, "", edge_type)
-            gsub(/^[[:space:]]+/, "", target_node)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", target_node)
             
             # Build adjacency list
-            if (source_node != "" && target_node != "") {
+            if (source_node != "" && target_node != "" && edge_type != "") {
                 adj[source_node] = adj[source_node] "|" edge_type ":" target_node
                 in_degree[target_node]++
                 if (!(source_node in in_degree)) in_degree[source_node] = 0
+                
+                # Debug: print parsed relationships
+                # print "DEBUG: \"" source_node "\" -> \"" edge_type "\" -> \"" target_node "\""
             }
         }
     }
     
     END {
+        # Debug: print adjacency list
+        # print "DEBUG: Adjacency list:"
+        # for (node in adj) {
+        #     print "DEBUG: " node " -> " adj[node]
+        # }
+        
         # Find starting nodes (in_degree = 0)
         for (node in in_degree) {
             if (in_degree[node] == 0) {
                 queue[++qend] = node "|" node
+                # print "DEBUG: Starting node: " node
+            }
+        }
+        
+        # If no starting nodes found, use all nodes as potential starts
+        if (qend == 0) {
+            for (node in adj) {
+                queue[++qend] = node "|" node
+                # print "DEBUG: Using node as start: " node
             }
         }
         
@@ -321,13 +306,60 @@ make_chains() {
                     edge_type = edge_parts[1]
                     next_node = edge_parts[2]
                     
-                    new_path = path " ---" edge_type "--> " next_node
-                    queue[++qend] = next_node "|" new_path
+                    # Avoid cycles - check if next_node is already in path
+                    if (index(path, next_node) == 0) {
+                        new_path = path " ---" edge_type "--> " next_node
+                        queue[++qend] = next_node "|" new_path
+                        # print "DEBUG: Extended path: " new_path
+                    }
                 }
             } else {
                 # This is a terminal node, output the path
-                print path
+                # Only output paths with at least 2 nodes (not just single nodes)
+                if (path != node) {
+                    print path
+                }
             }
+        }
+        
+        # Debug: print statistics
+        # print "DEBUG: Processed " qend " paths"
+    }
+    ' "$input_file"
+}
+
+keep_shortest_chains() {
+    local input_file="$1"
+    
+    awk '
+    {
+        line = $0
+        # Count the number of "--> " to determine chain length
+        chain_length = gsub(/---> /, "&")
+        
+        # Extract source and target nodes
+        if (match(line, /(.*) ---[^>]*--> (.*)/)) {
+            source = substr(line, RSTART, RLENGTH)
+            target = substr(line, RSTART + length(source))
+            # Clean the source and target for key generation
+            source_clean = source
+            target_clean = target
+            gsub(/@[^[:space:]]+/, "", source_clean)
+            gsub(/@[^[:space:]]+/, "", target_clean)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", source_clean)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", target_clean)
+            
+            key = source_clean "|" target_clean
+            
+            if (!(key in best_chain) || chain_length < best_length[key]) {
+                best_chain[key] = line
+                best_length[key] = chain_length
+            }
+        }
+    }
+    END {
+        for (key in best_chain) {
+            print best_chain[key]
         }
     }
     ' "$input_file"
@@ -563,7 +595,7 @@ fi
 # Starts the BH API if not listening
 stat=$(curl -s -o /dev/null -w "%{http_code}" $BH_URL/api/v2/login)
 if [[ $stat != "405" ]]; then
-    echo -e "\n---------STARTING BLOODHOUND API--------------"
+    echo -e "\n[*] Starting Bloodhound API..."
     $bd_cli containers start
 fi
 
@@ -587,7 +619,7 @@ fi
 
 
 if [[ $NO_GATHER == false ]]; then
-    echo -e "\n------------UPLOADING ZIP FILE TO BLOODHOUND API--------------"
+    echo -e "\n[*] Uploading ZIP file to Bloodhound API..."
     timeout 300 bhcli upload $zip_file
     exit_code=$?
 
@@ -645,12 +677,15 @@ bhcli stats -d $domain
 # Launch DACL Query
 show_color_legend
 if $ALL_FLAG; then
-    DACL_JSON=$(curl -s "$BH_URL/api/v2/graphs/cypher" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"query\":\"MATCH p=shortestPath((s)-[:Owns|GenericAll|GenericWrite|WriteOwner|WriteDacl|MemberOf|ForceChangePassword|AllExtendedRights|AddMember|HasSession|GPLink|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|HasSIDHistory|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions|WriteGPLink|GoldenCert|ADCSESC1|ADCSESC3|ADCSESC4|ADCSESC6a|ADCSESC6b|ADCSESC9a|ADCSESC9b|ADCSESC10a|ADCSESC10b|ADCSESC13|SyncedToEntraUser|CoerceAndRelayNTLMToSMB|CoerceAndRelayNTLMToADCS|WriteOwnerLimitedRights|OwnsLimitedRights|ClaimSpecialIdentity|CoerceAndRelayNTLMToLDAP|CoerceAndRelayNTLMToLDAPS|ContainsIdentity|PropagatesACEsTo|CanApplyGPO|HasTrustKeys|ManageCA|ManageCertificates|DCFor|SameForestTrust|SpoofSIDHistory|AbuseTGTDelegation*1..10]->(t)) WHERE (s:User OR s:Computer) AND (t:User OR t:Computer OR t:Domain OR t:GPO OR t:OU) AND s<>t AND s.domain = 'EU-IFRIT.VL' RETURN p LIMIT 1000\"}")
+    # Original comprehensive query with all filtering
+    DACL_JSON=$(curl -s "$BH_URL/api/v2/graphs/cypher" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"query\":\"MATCH p=shortestPath((s)-[:Owns|GenericAll|WriteGPLink|MemberOf|GPOAppliesTo|GenericWrite|WriteOwner|WriteDacl|ForceChangePassword|AllExtendedRights|AddMember|HasSession|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions*1..]->(t)) WHERE NOT COALESCE(s.system_tags, '') CONTAINS 'admin_tier_0' AND (s:User OR s:Computer) AND (t:User OR t:Computer OR (t:Group AND NOT t.objectid =~ '.*-(581|578|568|554|498|558|552|521|553|557|561|513|582|579|575|571|559|577|576|517|1102|522|569|574|545|515|572|560|556)$' AND NOT t.distinguishedname =~ '.*EXCHANGE INSTALL DOMAIN.*') OR t:OU OR t:Domain) AND NOT (t.distinguishedname =~ '.*(EXCHANGE ONLINE-APPLICATION|GUEST|DEFAULTACCOUNT|SYSTEMMAILBOX|DISCOVERYSEARCHMAILBOX|FEDERATEDEMAIL|HEALTHMAILBOX|MIGRATION).*') AND s<>t AND s.domain = '${flt_domain}' RETURN p\"}")
 else
     if [[ -n "$OWNED_FILE" ]]; then
+        echo -e "[*] Marking owned users from file: $OWNED_FILE"
         bhcli mark owned --file "$OWNED_FILE" | grep -v 'already marked as owned'
     fi
-    DACL_JSON=$(curl -s "$BH_URL/api/v2/graphs/cypher" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"query\":\"MATCH p=shortestPath((s)-[:Owns|GenericAll|GenericWrite|WriteOwner|WriteDacl|MemberOf|ForceChangePassword|AllExtendedRights|AddMember|HasSession|GPLink|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|HasSIDHistory|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions|WriteGPLink|GoldenCert|ADCSESC1|ADCSESC3|ADCSESC4|ADCSESC6a|ADCSESC6b|ADCSESC9a|ADCSESC9b|ADCSESC10a|ADCSESC10b|ADCSESC13|SyncedToEntraUser|CoerceAndRelayNTLMToSMB|CoerceAndRelayNTLMToADCS|WriteOwnerLimitedRights|OwnsLimitedRights|ClaimSpecialIdentity|CoerceAndRelayNTLMToLDAP|CoerceAndRelayNTLMToLDAPS|ContainsIdentity|PropagatesACEsTo|CanApplyGPO|HasTrustKeys|ManageCA|ManageCertificates|DCFor|SameForestTrust|SpoofSIDHistory|AbuseTGTDelegation*1..10]->(t)) WHERE (s:User OR s:Computer) AND (t:User OR t:Computer OR t:Domain OR t:GPO OR t:OU) AND s<>t AND ANY(tag IN s.system_tags WHERE tag = 'owned') AND s.domain = 'EU-IFRIT.VL' RETURN p LIMIT 1000\"}")
+    # Owned users query with the same comprehensive filtering
+    DACL_JSON=$(curl -s "$BH_URL/api/v2/graphs/cypher" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"query\":\"MATCH p=shortestPath((s)-[:Owns|GenericAll|WriteGPLink|MemberOf|GPOAppliesTo|GenericWrite|WriteOwner|WriteDacl|ForceChangePassword|AllExtendedRights|AddMember|HasSession|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions*1..]->(t)) WHERE (s:User OR s:Computer) AND (t:User OR t:Computer OR (t:Group AND NOT t.objectid =~ '.*-(581|578|568|554|498|558|552|521|553|557|561|513|582|579|575|571|559|577|576|517|1102|522|569|574|545|515|572|560|556)$' AND NOT t.distinguishedname =~ '.*EXCHANGE INSTALL DOMAIN.*') OR t:OU OR t:Domain) AND NOT (t.distinguishedname =~ '.*(EXCHANGE ONLINE-APPLICATION|GUEST|DEFAULTACCOUNT|SYSTEMMAILBOX|DISCOVERYSEARCHMAILBOX|FEDERATEDEMAIL|HEALTHMAILBOX|MIGRATION).*') AND s<>t AND ANY(tag IN s.system_tags WHERE tag = 'owned') AND s.domain = '${flt_domain}' RETURN p\"}")
 fi
 echo -e "\n${GRAY}[*] Query executed, parsing it..."
 
@@ -677,43 +712,77 @@ DACL=$(echo "$DACL_JSON" | jq -r '
 done)
 
 if [[ ! -z $DACL ]]; then
-    echo -e "[*] Building attack chains..."
+    echo -e "\n[*] Building attack chains..."
     start_time=$(date +%s)
     
-    # Parse and prepare DACL data
-    echo "$DACL" | sed 's/BREAK /\n/g' | sed 's/BREAK//g' | sed "s/@${flt_domain}//g" | sed "s/\.${flt_domain}/\$/g" | sort -u > ./DACL_${flt_domain}
-    align_ad_relationships "./DACL_${flt_domain}" > ./DACL_ALIGN_${flt_domain} && mv ./DACL_ALIGN_${flt_domain} ./DACL_${flt_domain}
+    # Parse and prepare DACL data - handle domain suffixes properly
+    echo "$DACL" | sed 's/BREAK /\n/g' | sed 's/BREAK//g' | sed "s/@${flt_domain}//g" | sed "s/\.${flt_domain}//g" | sed 's/[[:space:]]*$//' | sort -u > ./DACL_${flt_domain}
     
-    # Use optimized chain building
+    echo -e "[*] Processed $(wc -l < "./DACL_${flt_domain}") unique relationships"
+    
+    # Only align if we have relationships
+    if [[ -s "./DACL_${flt_domain}" ]]; then
+        align_ad_relationships "./DACL_${flt_domain}" > ./DACL_ALIGN_${flt_domain} && mv ./DACL_ALIGN_${flt_domain} ./DACL_${flt_domain}
+        echo -e "[*] After alignment: $(wc -l < "./DACL_${flt_domain}") relationships"
+    else
+        echo -e "[-] No relationships found after parsing DACL data"
+        exit 1
+    fi
+        # Use optimized chain building
     echo -e "[*] Processing $(wc -l < "./DACL_${flt_domain}") relationships..."
+    
     make_chains "./DACL_${flt_domain}" > "DACL_ABUSE_${flt_domain}.txt"
     
     end_time=$(date +%s)
     echo -e "[+] Chain building completed in $((end_time - start_time)) seconds${NC}"
+    
+    end_time=$(date +%s)
+    echo -e "[+] Chain building completed in $((end_time - start_time)) seconds${NC}"
 
-    # ORIGINAL FILTERING AND DISPLAY LOGIC (unchanged)
-    # Admin group truncation
-    cat DACL_ABUSE_${flt_domain}.txt | sed 's/\(-> .*KEY ADMINS\).*/\1/' | sed 's/\(-> .*ADMINISTRATORS\).*/\1/' | sed 's/\(-> .*DOMAIN ADMINS\).*/\1/' | sed 's/\(-> .*ENTERPRISE ADMINS\).*/\1/' | sort -u >t;mv t DACL_ABUSE_${flt_domain}.txt
+    # FIXED FILTERING LOGIC - PROPERLY SEPARATE PURE MEMBERSHIP CHAINS
 
-    # Account operators domain paths
-    cat DACL_ABUSE_${flt_domain}.txt | grep "ACCOUNT OPERATORS" --color=never | grep ${flt_domain} --color=never > t
-    if [[ -s t ]]; then
-        echo -e "ACCOUNT OPERATORS MEMBERS FOUND! THIS GROUP HAS GENERIC-ALL ON ALL ACCOUNTS AND GROUPS, DISPLAYING ONLY PATHS TO DOMAIN"
+    # Account operators domain paths - JUST FOR DISPLAY, DON'T REMOVE
+    if [[ -s "DACL_ABUSE_${flt_domain}.txt" ]]; then
+        account_ops_chains=$(cat DACL_ABUSE_${flt_domain}.txt | grep "ACCOUNT OPERATORS" --color=never | grep ${flt_domain} --color=never)
+        if [[ -n "$account_ops_chains" ]]; then
+            echo -e "ACCOUNT OPERATORS MEMBERS FOUND! THIS GROUP HAS GENERIC-ALL ON ALL ACCOUNTS AND GROUPS"
+        fi
     fi
-    cat DACL_ABUSE_${flt_domain}.txt | grep -v "ACCOUNT OPERATORS" > t2
-    cat t >> t2 && mv t2 DACL_ABUSE_${flt_domain}.txt && rm t
 
-    # Pure MemberOf Chains - extract them but don't remove from main file for display
-    cat DACL_ABUSE_${flt_domain}.txt | grep -vE "Owns|GenericAll|GenericWrite|WriteOwner|WriteDacl|ForceChangePassword|AllExtendedRights|AddMember|HasSession|GPLink|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|HasSIDHistory|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions|WriteGPLink|GoldenCert|ADCSESC1|ADCSESC3|ADCSESC4|GPOAppliesTo|ADCSESC6a|ADCSESC6b|ADCSESC9a|ADCSESC9b|ADCSESC10a|ADCSESC10b|ADCSESC13|SyncedToEntraUser|CoerceAndRelayNTLMToSMB|CoerceAndRelayNTLMToADCS|WriteOwnerLimitedRights|OwnsLimitedRights|DCFor" --color=never | grep -v ^$ > GRPS_${flt_domain}.txt
+    # Extract PURE MemberOf chains (chains that contain ONLY MemberOf relationships)
+    if [[ -s "DACL_ABUSE_${flt_domain}.txt" ]]; then
+        # First, create a temporary file with chains that contain ONLY MemberOf
+        grep -E "^[^-]*( ---MemberOf--> [^-]*)*$" "DACL_ABUSE_${flt_domain}.txt" | grep -vE "GenericAll|GenericWrite|WriteOwner|WriteDacl|ForceChangePassword|AllExtendedRights|AddMember|HasSession|GPLink|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|HasSIDHistory|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions|WriteGPLink|GoldenCert|ADCSESC1|ADCSESC3|ADCSESC4|GPOAppliesTo|ADCSESC6a|ADCSESC6b|ADCSESC9a|ADCSESC9b|ADCSESC10a|ADCSESC10b|ADCSESC13|SyncedToEntraUser|CoerceAndRelayNTLMToSMB|CoerceAndRelayNTLMToADCS|WriteOwnerLimitedRights|OwnsLimitedRights|DCFor" > GRPS_${flt_domain}.txt
 
-    # Pure MemberOf Chains - extract them
-    cat DACL_ABUSE_${flt_domain}.txt | grep -vE "Owns|GenericAll|GenericWrite|WriteOwner|WriteDacl|ForceChangePassword|AllExtendedRights|AddMember|HasSession|GPLink|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|HasSIDHistory|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions|WriteGPLink|GoldenCert|ADCSESC1|ADCSESC3|ADCSESC4|GPOAppliesTo|ADCSESC6a|ADCSESC6b|ADCSESC9a|ADCSESC9b|ADCSESC10a|ADCSESC10b|ADCSESC13|SyncedToEntraUser|CoerceAndRelayNTLMToSMB|CoerceAndRelayNTLMToADCS|WriteOwnerLimitedRights|OwnsLimitedRights|DCFor" --color=never | grep -v ^$ > GRPS_${flt_domain}.txt
+        # Now REMOVE these pure MemberOf chains from the main DACL abuse file
+        if [[ -s "GRPS_${flt_domain}.txt" ]]; then
+            grep -vFf "GRPS_${flt_domain}.txt" "DACL_ABUSE_${flt_domain}.txt" > t
+            mv t "DACL_ABUSE_${flt_domain}.txt"
+            echo -e "[+] Removed $(wc -l < "GRPS_${flt_domain}.txt") pure MemberOf chains from DACL abuse"
+        fi
+    fi
 
-    # REMOVE PURE MEMBERSHIP CHAINS FROM DACL ABUSE FILE
-    while read -r line; do
-        grep -F -v "$line" DACL_ABUSE_${flt_domain}.txt > t
-        mv t DACL_ABUSE_${flt_domain}.txt
-    done < GRPS_${flt_domain}.txt
+    # Remove chains that end with MemberOf (they don't lead to actual privileges)
+    if [[ -s "DACL_ABUSE_${flt_domain}.txt" ]]; then
+        awk '!/---MemberOf--> [^---]*$/' "DACL_ABUSE_${flt_domain}.txt" > t
+        removed_count=$(($(wc -l < "DACL_ABUSE_${flt_domain}.txt") - $(wc -l < t)))
+        if [[ $removed_count -gt 0 ]]; then
+            echo -e "[+] Removed $removed_count chains that end with MemberOf"
+        fi
+        mv t "DACL_ABUSE_${flt_domain}.txt"
+    fi
+
+    # Remove duplicate/redundant chains - keep only the shortest path for each source-target pair
+    if [[ -s "DACL_ABUSE_${flt_domain}.txt" ]]; then
+        keep_shortest_chains "DACL_ABUSE_${flt_domain}.txt" > t
+        original_count=$(wc -l < "DACL_ABUSE_${flt_domain}.txt")
+        new_count=$(wc -l < t)
+        removed_duplicates=$((original_count - new_count))
+        if [[ $removed_duplicates -gt 0 ]]; then
+            echo -e "[+] Removed $removed_duplicates duplicate/redundant chains"
+        fi
+        mv t "DACL_ABUSE_${flt_domain}.txt"
+    fi
 fi
 
 
@@ -802,25 +871,25 @@ get_unique_sources() {
 
 # --------------------------------------Main menu - simplified version
 
-# Display pure membership chains first (information only)
-if [[ -s GRPS_${flt_domain}.txt ]]; then
-    echo -e "\n${BOLD}PURE MEMBERSHIP CHAINS (Information Only)${NC}"
-    echo "=========================================================="
-    cat GRPS_${flt_domain}.txt
-fi
-
 # Read all chains into an array (with colors preserved)
 readarray -t all_chains < "DACL_ABUSE_${flt_domain}.txt"
 
 # Check if we have any chains
 if [ ${#all_chains[@]} -eq 0 ]; then
-    echo -e "[-] ERROR: No valid chains found in file"
+    echo -e "${RED}[-] ERROR: No valid chains found in file${NC}"
     exit 1
+fi
+
+# Display pure membership chains first (information only)
+if [[ -s GRPS_${flt_domain}.txt ]]; then
+    echo -e "\n${BOLD}${YELLOW}PURE MEMBERSHIP CHAINS (Information Only)${NC}"
+    echo "=========================================================="
+    cat GRPS_${flt_domain}.txt
 fi
 
 # Display DACL abuse chains with numbers and colors
 if [[ -s DACL_ABUSE_${flt_domain}.txt ]]; then
-    echo -e "\n${BOLD}DACL ABUSE CHAINS (Select to Exploit)${NC}"
+    echo -e "\n${BOLD}${YELLOW}DACL ABUSE CHAINS (Select to Exploit)${NC}"
     echo "=========================================================="
     for i in "${!all_chains[@]}"; do
         printf "%2d) %s\n" $((i+1)) "${all_chains[i]}"
