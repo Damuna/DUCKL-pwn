@@ -46,9 +46,8 @@ def make_chains_fast(input_file_path, dacl_output_file, member_output_file):
         else:
             current_chain = node
 
-        # Check if this is an end node
+        # Check if this is an end node (no outgoing edges)
         if node not in graph:
-            # Process the complete chain
             process_complete_chain(current_chain, current_edges)
             return
 
@@ -60,32 +59,24 @@ def make_chains_fast(input_file_path, dacl_output_file, member_output_file):
                 new_edges = current_edges + [(edge_type, neighbor)]
                 find_paths_from(neighbor, current_chain, visited.copy(), new_edges)
 
-        # If no unvisited neighbors, this is an end point
+        # If no unvisited neighbors, this path ends here
         if not has_unvisited:
             process_complete_chain(current_chain, current_edges)
 
     def process_complete_chain(full_chain, edges):
-        # Extract pure membership chains (single MemberOf edges)
+        # --- IMPROVED: Extract pure membership chains ---
+        start_node = full_chain.split(" ")[0]
+        path_nodes = [start_node] + [edge[1] for edge in edges]
+
         for i, (edge_type, target) in enumerate(edges):
             if "MemberOf" in edge_type:
-                # Get the source node for this MemberOf edge
-                if i == 0:
-                    source = full_chain.split(" ")[0]
-                else:
-                    # Extract source from previous part of chain
-                    parts = full_chain.split(" ---")
-                    if i < len(parts):
-                        source_part = parts[i].split("--> ")[-1]
-                        source = source_part.strip()
-                    else:
-                        continue
-
+                source = path_nodes[i]
                 member_chain = f"{source} ---{edge_type}--> {target}"
                 member_chains.add(member_chain)
 
         # Create DACL chain by removing MemberOf edges and their groups
         dacl_chain_parts = []
-        current_source = full_chain.split(" ")[0]  # Start with first node
+        current_source = full_chain.split(" ")[0]
 
         i = 0
         while i < len(edges):
@@ -116,14 +107,17 @@ def make_chains_fast(input_file_path, dacl_output_file, member_output_file):
             # Connect consecutive parts properly
             final_dacl_chain = dacl_chain_parts[0]
             for part in dacl_chain_parts[1:]:
-                # Extract the last node from current chain and the new part
-                last_node = final_dacl_chain.split("--> ")[-1]
-                new_part_source = part.split(" ")[0]
-                # If they don't match, we need to handle the connection
+                last_node = final_dacl_chain.split("--> ")[-1].strip()
+                new_part_source = part.split(" ")[0].strip()
+
                 if last_node != new_part_source:
                     final_dacl_chain += f" ---{part.split('---')[1].split('-->')[0]}--> {part.split('--> ')[-1]}"
                 else:
-                    final_dacl_chain = part
+                    # --- THIS IS THE FIX ---
+                    # Instead of replacing the chain, append the new segment.
+                    # e.g., part is "B ---perm--> C", we append " ---perm--> C"
+                    edge_and_target = part.split(" ", 1)[1]
+                    final_dacl_chain += f" {edge_and_target}"
 
             dacl_chains.add(final_dacl_chain)
 
