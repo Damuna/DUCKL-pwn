@@ -588,36 +588,10 @@ if [[ ! -z $DACL ]]; then
         exit 1
     fi
 
-    "$SCRIPT_DIR/make_chains.py" "$DUCKPWN_DIR/DACL_${flt_domain}" | sort > "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt"
+    "$SCRIPT_DIR/make_chains.py" "$DUCKPWN_DIR/DACL_${flt_domain}" "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt" "$DUCKPWN_DIR/GRPS_${flt_domain}.txt"
 
     end_time=$(date +%s)
     echo -e "${GRAY}[+] Chain building completed in $((end_time - start_time)) seconds${NC}"
-    
-    # FIXED FILTERING LOGIC - PROPERLY SEPARATE PURE MEMBERSHIP CHAINS
-
-    # Account operators domain paths - JUST FOR DISPLAY, DON'T REMOVE
-    if [[ -s "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt" ]]; then
-        account_ops_chains=$(cat "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt" | grep "ACCOUNT OPERATORS" --color=never | grep ${flt_domain} --color=never)
-        if [[ -n "$account_ops_chains" ]]; then
-            echo -e "ACCOUNT OPERATORS MEMBERS FOUND! THIS GROUP HAS GENERIC-ALL ON ALL ACCOUNTS AND GROUPS"
-        fi
-    fi
-
-    # Extract PURE MemberOf chains (chains that contain ONLY MemberOf relationships)
-    if [[ -s "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt" ]]; then
-        # First, create a temporary file with chains that contain ONLY MemberOf
-        grep -E "^[^-]*( ---MemberOf--> [^-]*)*$" "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt" | grep -vE "GenericAll|GenericWrite|WriteOwner|WriteDacl|ForceChangePassword|AllExtendedRights|AddMember|HasSession|GPLink|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|HasSIDHistory|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions|WriteGPLink|GoldenCert|ADCSESC1|ADCSESC3|ADCSESC4|GPOAppliesTo|ADCSESC6a|ADCSESC6b|ADCSESC9a|ADCSESC9b|ADCSESC10a|ADCSESC10b|ADCSESC13|SyncedToEntraUser|CoerceAndRelayNTLMToSMB|CoerceAndRelayNTLMToADCS|WriteOwnerLimitedRights|OwnsLimitedRights|DCFor" > "$DUCKPWN_DIR/GRPS_${flt_domain}.txt"
-    fi
-
-    # Remove chains that end with MemberOf (they don't lead to actual privileges)
-    if [[ -s "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt" ]]; then
-        awk '!/---MemberOf--> [^---]*$/' "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt" > "$DUCKPWN_DIR/t"
-        removed_count=$(($(wc -l < "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt") - $(wc -l < "$DUCKPWN_DIR/t")))
-        if [[ $removed_count -gt 0 ]]; then
-            echo -e "[+] Removed $removed_count chains that end with MemberOf"
-        fi
-        mv "$DUCKPWN_DIR/t" "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt"
-    fi
 fi
 
 
@@ -692,17 +666,6 @@ if [ ${#chains[@]} -eq 0 ]; then
     echo -e "[-] ERROR: No valid chains found in file"
     exit 1
 fi
-
-# Extract unique starting points
-get_unique_sources() {
-    declare -A sources
-    for chain in "${chains[@]}"; do
-        # Extract first node (handles chains starting with special characters)
-        source_node=$(echo -e "$chain" | awk '{print $1}')
-        sources["$source_node"]=1
-    done
-    printf '%s\n' "${!sources[@]}" | sort
-}
 
 # --------------------------------------Main menu - simplified version
 
