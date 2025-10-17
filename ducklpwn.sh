@@ -1,6 +1,7 @@
 #!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/exploits.sh"
+mkdir -p ./ducklpwn_files
 
 # Define colors (non-bold versions)
 WHITE='\033[0;37m'      # Abuse type
@@ -231,165 +232,134 @@ else
     fi
 fi
 
-make_chains() {
-    local input_file="$1"
+authenticate_user() {
+    local AUTH_USER="$1"
+    local DC_FQDN="$2"
     
-    awk '
-    {
-        # Remove domain suffixes for processing
-        gsub(/@[^[:space:]]+/, "", $0)
+    while true; do
+        echo -e "${YELLOW}[?] Choose authentication method for $AUTH_USER:${NC}"
+        echo -e "  1) Password"
+        echo -e "  2) NT hash"
+        echo -e "  3) Kerberos ticket file"
+        read -erp "Select option (1-3): " auth_method </dev/tty
         
-        # Parse line: source ---edge_type--> target
-        if (match($0, /(.*) ---(.*)--> (.*)/)) {
-            source_node = substr($0, RSTART, RLENGTH)
-            source_clean = source_node
-            
-            # Extract components using field splitting
-            split($0, parts, " ---")
-            source_node = parts[1]
-            rest = parts[2]
-            
-            split(rest, edge_parts, "--> ")
-            edge_type = edge_parts[1]
-            target_node = edge_parts[2]
-            
-            # Clean up whitespace
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", source_node)
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", edge_type)
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", target_node)
-            
-            # Build adjacency list
-            if (source_node != "" && target_node != "" && edge_type != "") {
-                adj[source_node] = adj[source_node] "|" edge_type ":" target_node
-                in_degree[target_node]++
-                if (!(source_node in in_degree)) in_degree[source_node] = 0
+        case $auth_method in
+            1)
+                read -erp "[?] Enter password for $AUTH_USER: " password </dev/tty
+                echo
+                get_ticket "$DC_FQDN" -u "$AUTH_USER" -p "$password"
+                if [ $? -eq 0 ]; then break; fi
+                ;;
                 
-                # Debug: print parsed relationships
-                # print "DEBUG: \"" source_node "\" -> \"" edge_type "\" -> \"" target_node "\""
-            }
-        }
-    }
-    
-    END {
-        # Debug: print adjacency list
-        # print "DEBUG: Adjacency list:"
-        # for (node in adj) {
-        #     print "DEBUG: " node " -> " adj[node]
-        # }
-        
-        # Find starting nodes (in_degree = 0)
-        for (node in in_degree) {
-            if (in_degree[node] == 0) {
-                queue[++qend] = node "|" node
-                # print "DEBUG: Starting node: " node
-            }
-        }
-        
-        # If no starting nodes found, use all nodes as potential starts
-        if (qend == 0) {
-            for (node in adj) {
-                queue[++qend] = node "|" node
-                # print "DEBUG: Using node as start: " node
-            }
-        }
-        
-        # BFS traversal
-        while (qstart < qend) {
-            qstart++
-            split(queue[qstart], parts, "|")
-            node = parts[1]
-            path = parts[2]
-            
-            if (node in adj) {
-                split(adj[node], edges, "|")
-                for (i = 2; i <= length(edges); i++) {
-                    if (edges[i] == "") continue
-                    split(edges[i], edge_parts, ":")
-                    edge_type = edge_parts[1]
-                    next_node = edge_parts[2]
+            2)
+                while true; do
+                    read -erp "[?] Enter NT hash for $AUTH_USER (32 chars): " nt_hash </dev/tty
+                    if [[ "$nt_hash" =~ ^[a-fA-F0-9]{32}$ ]]; then
+                        get_ticket "$DC_FQDN" -u "$AUTH_USER" -H "$nt_hash"
+                        if [ $? -eq 0 ]; then break 2; fi
+                        break
+                    else
+                        echo -e "[-] Invalid hash format. Must be 32-character hex string."
+                    fi
+                done
+                ;;
+                
+            3)
+                while true; do
+                    read -erp "[?] Enter path to Kerberos ticket file: " ticket_file </dev/tty
+                    if [[ ! -f "$ticket_file" ]]; then
+                        echo -e "[-] File does not exist: $ticket_file"
+                        break
+                    fi
                     
-                    # Avoid cycles - check if next_node is already in path
-                    if (index(path, next_node) == 0) {
-                        new_path = path " ---" edge_type "--> " next_node
-                        queue[++qend] = next_node "|" new_path
-                        # print "DEBUG: Extended path: " new_path
-                    }
-                }
-            } else {
-                # This is a terminal node, output the path
-                # Only output paths with at least 2 nodes (not just single nodes)
-                if (path != node) {
-                    print path
-                }
-            }
-        }
+                    if [[ ! -s "$ticket_file" ]]; then
+                        echo -e "[-] Ticket file is empty: $ticket_file"
+                        break
+                    fi
+                    
+                    # Clean the source name for filename
+                    auth_user_clean=$(echo -e "$AUTH_USER" | sed -e 's/\x1b\[[0-9;]*m//g')
+                    cp "$ticket_file" "./${auth_user_clean}.ccache"
+                    cp "$ticket_file" "./${auth_user_clean,,}.ccache"
+                    
+                    export KRB5CCNAME="$ticket_file"
+                    if klist; then
+                        break 2
+                    else
+                        echo -e "[-] The provided ticket file is invalid or expired"
+                        break
+                    fi
+                done
+                ;;
+                
+            *)
+                echo -e "[-] Invalid selection. Please choose 1, 2, or 3."
+                ;;
+        esac
         
-    }
-    ' "$input_file"
-}
-
-keep_shortest_chains() {
-    local input_file="$1"
-    
-    awk '
-    {
-        line = $0
-        # Count the number of "--> " to determine chain length
-        chain_length = gsub(/---> /, "&")
-        
-        # Extract source and target nodes
-        if (match(line, /(.*) ---[^>]*--> (.*)/)) {
-            source = substr(line, RSTART, RLENGTH)
-            target = substr(line, RSTART + length(source))
-            # Clean the source and target for key generation
-            source_clean = source
-            target_clean = target
-            gsub(/@[^[:space:]]+/, "", source_clean)
-            gsub(/@[^[:space:]]+/, "", target_clean)
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", source_clean)
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", target_clean)
-            
-            key = source_clean "|" target_clean
-            
-            if (!(key in best_chain) || chain_length < best_length[key]) {
-                best_chain[key] = line
-                best_length[key] = chain_length
-            }
-        }
-    }
-    END {
-        for (key in best_chain) {
-            print best_chain[key]
-        }
-    }
-    ' "$input_file"
-}
-
-# Function to split work across multiple cores
-parallel_process_chains() {
-    local input_file="$1"
-    local num_cores=$(nproc)
-    local total_lines=$(wc -l < "$input_file")
-    local lines_per_core=$(( (total_lines + num_cores - 1) / num_cores ))
-    
-    # Split input file
-    split -l "$lines_per_core" "$input_file" "${input_file}.part."
-    
-    # Process in parallel
-    for part_file in "${input_file}.part."*; do
-        make_chains "$part_file" > "${part_file}.chains" &
+        echo -e "[-] Authentication failed. Please try again.\n"
     done
+}
+
+authenticate_group_member() {
+    local source="$1"
+    local DC_FQDN="$2"
     
-    # Wait for all jobs
-    wait
-    
-    # Combine results
-    cat "${input_file}.part."*.chains > "${input_file%.*}_parallel.chains"
-    
-    # Cleanup
-    rm "${input_file}.part."*
-    
-    echo -e "${input_file%.*}_parallel.chains"
+    while true; do
+        # Ask for username - use $source (the group name) in prompt
+        read -erp $'[?] Enter username for a member of '"${source}"$'\e[0m: ' username </dev/tty
+        # Convert to uppercase but preserve existing $ if present
+        if [[ "$username" == *\$ ]]; then
+            SRC=$(echo "${username%\$}" | tr '[:lower:]' '[:upper:]')"\$"
+        else
+            SRC=$(echo "$username" | tr '[:lower:]' '[:upper:]')
+        fi
+        
+        # Authentication menu
+        echo "[?] Choose authentication method for $SRC:"
+        echo "  1) Password"
+        echo "  2) NT hash"
+        echo "  3) Kerberos ticket file (avoid if privileges need to be updated)"
+        read -erp "Select option (1-3): " auth_method </dev/tty
+        
+        case $auth_method in
+            1)
+                read -erp "[?] Enter password for $SRC: " password </dev/tty
+                echo
+                get_ticket "$DC_FQDN" -u "$SRC" -p "$password"
+                [ $? -eq 0 ] && break
+                ;;
+            2)
+                while true; do
+                    read -erp "[?] Enter NT hash for $SRC (32 chars): " nt_hash </dev/tty
+                    if [[ "$nt_hash" =~ ^[a-fA-F0-9]{32}$ ]]; then
+                        get_ticket "$DC_FQDN" -u "$SRC" -H "$nt_hash"
+                        [ $? -eq 0 ] && break 2
+                        break
+                    else
+                        echo "[-] Invalid hash format. Must be 32-character hex string."
+                    fi
+                done
+                ;;
+            3)
+                while true; do
+                    read -erp "[?] Enter path to Kerberos ticket file: " ticket_file </dev/tty
+                    if [[ -f "$ticket_file" && -s "$ticket_file" ]]; then
+                        cp "$ticket_file" "./${USER}.ccache"
+                        export KRB5CCNAME="$ticket_file"
+                        klist && break 2 || echo "[-] Invalid/expired ticket file"; break
+                    else
+                        echo "[-] Invalid ticket file"
+                        break
+                    fi
+                done
+                ;;
+            *)
+                echo "[-] Invalid selection. Please choose 1, 2, or 3."
+                ;;
+        esac
+        echo -e "[-] Authentication failed. Please try again.\n"
+    done
 }
 
 colorize_kind() {
@@ -653,7 +623,7 @@ if [[ ! -z $DACL ]]; then
     echo -e "$DACL" | sed 's/BREAK /\n/g' | sed 's/BREAK//g' | sed "s/@${flt_domain}//g" | sed "s/\.${flt_domain}//g" | sed 's/[[:space:]]*$//' | sort -u > ./DACL_${flt_domain}
     
     echo -e "[*] Processed $(wc -l < "./DACL_${flt_domain}") unique relationships"
-    
+
     # Only align if we have relationships
     if [[ -s "./DACL_${flt_domain}" ]]; then
         align_ad_relationships "./DACL_${flt_domain}" > ./DACL_ALIGN_${flt_domain} && mv ./DACL_ALIGN_${flt_domain} ./DACL_${flt_domain}
@@ -662,10 +632,10 @@ if [[ ! -z $DACL ]]; then
         exit 1
     fi
 
-    make_chains "./DACL_${flt_domain}" > "DACL_ABUSE_${flt_domain}.txt"
-    
+    "$SCRIPT_DIR/make_chains.py" "./DACL_${flt_domain}" | sort > "DACL_ABUSE_${flt_domain}.txt"
+
     end_time=$(date +%s)
-    echo -e "[+] Chain building completed in $((end_time - start_time)) seconds${NC}"
+    echo -e "${GRAY}[+] Chain building completed in $((end_time - start_time)) seconds${NC}"
     
     # FIXED FILTERING LOGIC - PROPERLY SEPARATE PURE MEMBERSHIP CHAINS
 
@@ -681,13 +651,6 @@ if [[ ! -z $DACL ]]; then
     if [[ -s "DACL_ABUSE_${flt_domain}.txt" ]]; then
         # First, create a temporary file with chains that contain ONLY MemberOf
         grep -E "^[^-]*( ---MemberOf--> [^-]*)*$" "DACL_ABUSE_${flt_domain}.txt" | grep -vE "GenericAll|GenericWrite|WriteOwner|WriteDacl|ForceChangePassword|AllExtendedRights|AddMember|HasSession|GPLink|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|HasSIDHistory|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions|WriteGPLink|GoldenCert|ADCSESC1|ADCSESC3|ADCSESC4|GPOAppliesTo|ADCSESC6a|ADCSESC6b|ADCSESC9a|ADCSESC9b|ADCSESC10a|ADCSESC10b|ADCSESC13|SyncedToEntraUser|CoerceAndRelayNTLMToSMB|CoerceAndRelayNTLMToADCS|WriteOwnerLimitedRights|OwnsLimitedRights|DCFor" > GRPS_${flt_domain}.txt
-
-        # Now REMOVE these pure MemberOf chains from the main DACL abuse file
-        if [[ -s "GRPS_${flt_domain}.txt" ]]; then
-            grep -vFf "GRPS_${flt_domain}.txt" "DACL_ABUSE_${flt_domain}.txt" > t
-            mv t "DACL_ABUSE_${flt_domain}.txt"
-            echo -e "[+] Removed $(wc -l < "GRPS_${flt_domain}.txt") pure MemberOf chains from DACL abuse"
-        fi
     fi
 
     # Remove chains that end with MemberOf (they don't lead to actual privileges)
@@ -696,18 +659,6 @@ if [[ ! -z $DACL ]]; then
         removed_count=$(($(wc -l < "DACL_ABUSE_${flt_domain}.txt") - $(wc -l < t)))
         if [[ $removed_count -gt 0 ]]; then
             echo -e "[+] Removed $removed_count chains that end with MemberOf"
-        fi
-        mv t "DACL_ABUSE_${flt_domain}.txt"
-    fi
-
-    # Remove duplicate/redundant chains - keep only the shortest path for each source-target pair
-    if [[ -s "DACL_ABUSE_${flt_domain}.txt" ]]; then
-        keep_shortest_chains "DACL_ABUSE_${flt_domain}.txt" > t
-        original_count=$(wc -l < "DACL_ABUSE_${flt_domain}.txt")
-        new_count=$(wc -l < t)
-        removed_duplicates=$((original_count - new_count))
-        if [[ $removed_duplicates -gt 0 ]]; then
-            echo -e "[+] Removed $removed_duplicates duplicate/redundant chains"
         fi
         mv t "DACL_ABUSE_${flt_domain}.txt"
     fi
@@ -743,7 +694,7 @@ if [[ -s ./OU_TARGETS_${flt_domain}.txt ]]; then
         # Read input from file or stdin
         echo $OU | sed 's/BREAK /\n/g' | sed 's/BREAK//g' | sed "s/@${flt_domain}//g" | sed "s/\.${flt_domain}/\$/g" | sort -u > ./OU_${flt_domain}
         align_ad_relationships "./OU_${flt_domain}" > ./OU_ALIGN_${flt_domain} && mv ./OU_ALIGN_${flt_domain} ./OU_${flt_domain}
-        make_chains ./OU_${flt_domain} > OU_ABUSE_${flt_domain}.txt
+        "$SCRIPT_DIR/make_chains.py" ./OU_${flt_domain} | sort > OU_ABUSE_${flt_domain}.txt
         grep -F -f ./OU_TARGETS_${flt_domain}.txt OU_ABUSE_${flt_domain}.txt > t; mv t OU_ABUSE_${flt_domain}.txt
         if [[ -s OU_ABUSE_${flt_domain}.txt ]]; then
             echo -e "\n---------OU CHILD OBJECTS----------"
@@ -824,7 +775,7 @@ if [[ -s DACL_ABUSE_${flt_domain}.txt ]]; then
     done
 fi
 
-# Restore the original authentication logic
+# Selection menu
 selected_chains=()
 while true; do
     echo -e "\n${YELLOW}[?] Choose DACL Chain to Exploit:${NC}"
@@ -875,69 +826,7 @@ while true; do
             else
                 # For non-group starting nodes, use the node itself
                 AUTH_USER="$start_node"
-                while true; do
-                    echo -e "${YELLOW}[?] Choose authentication method for $AUTH_USER:${NC}"
-                    echo -e "  1) Password"
-                    echo -e "  2) NT hash"
-                    echo -e "  3) Kerberos ticket file"
-                    read -erp "Select option (1-3): " auth_method </dev/tty
-                    
-                    case $auth_method in
-                        1)
-                            read -erp "[?] Enter password for $AUTH_USER: " password </dev/tty
-                            echo
-                            get_ticket "$DC_FQDN" -u "$AUTH_USER" -p "$password"
-                            if [ $? -eq 0 ]; then break; fi
-                            ;;
-                            
-                        2)
-                            while true; do
-                                read -erp "[?] Enter NT hash for $AUTH_USER (32 chars): " nt_hash </dev/tty
-                                if [[ "$nt_hash" =~ ^[a-fA-F0-9]{32}$ ]]; then
-                                    get_ticket "$DC_FQDN" -u "$AUTH_USER" -H "$nt_hash"
-                                    if [ $? -eq 0 ]; then break 2; fi
-                                    break
-                                else
-                                    echo -e "[-] Invalid hash format. Must be 32-character hex string."
-                                fi
-                            done
-                            ;;
-                            
-                        3)
-                            while true; do
-                                read -erp "[?] Enter path to Kerberos ticket file: " ticket_file </dev/tty
-                                if [[ ! -f "$ticket_file" ]]; then
-                                    echo -e "[-] File does not exist: $ticket_file"
-                                    break
-                                fi
-                                
-                                if [[ ! -s "$ticket_file" ]]; then
-                                    echo -e "[-] Ticket file is empty: $ticket_file"
-                                    break
-                                fi
-                                
-                                # Clean the source name for filename
-                                auth_user_clean=$(echo -e "$AUTH_USER" | sed -e 's/\x1b\[[0-9;]*m//g')
-                                cp "$ticket_file" "./${auth_user_clean}.ccache"
-                                cp "$ticket_file" "./${auth_user_clean,,}.ccache"
-                                
-                                export KRB5CCNAME="$ticket_file"
-                                if klist; then
-                                    break 2
-                                else
-                                    echo -e "[-] The provided ticket file is invalid or expired"
-                                    break
-                                fi
-                            done
-                            ;;
-                            
-                        *)
-                            echo -e "[-] Invalid selection. Please choose 1, 2, or 3."
-                            ;;
-                    esac
-                    
-                    echo -e "[-] Authentication failed. Please try again.\n"
-                done
+                authenticate_user $AUTH_USER $DC_FQDN
             fi
             
             echo -e "\n${GREEN}[+] Authentication successful for: $AUTH_USER${NC}"
@@ -981,61 +870,7 @@ for chain in "${selected_chains[@]}"; do
         if [[ "$prev_abuse" == "MemberOf" && "$prev_source_type" == "User" ]]; then
             SRC="$prev_src"
         elif [[ "$source_type" == "Group" && "$prev_abuse" != "MemberOf" ]]; then
-            while true; do
-                # Ask for username - use $source (the group name) in prompt
-                read -erp $'[?] Enter username for a member of '"${source}"$'\e[0m: ' username </dev/tty
-                # Convert to uppercase but preserve existing $ if present
-                if [[ "$username" == *\$ ]]; then
-                    SRC=$(echo "${username%\$}" | tr '[:lower:]' '[:upper:]')"\$"
-                else
-                    SRC=$(echo "$username" | tr '[:lower:]' '[:upper:]')
-                fi
-                
-                # Authentication menu
-                echo "[?] Choose authentication method for $SRC:"
-                echo "  1) Password"
-                echo "  2) NT hash"
-                echo "  3) Kerberos ticket file"
-                read -erp "Select option (1-3): " auth_method </dev/tty
-                
-                case $auth_method in
-                    1)
-                        read -erp "[?] Enter password for $SRC: " password </dev/tty
-                        echo
-                        get_ticket "$DC_FQDN" -u "$SRC" -p "$password"
-                        [ $? -eq 0 ] && break
-                        ;;
-                    2)
-                        while true; do
-                            read -erp "[?] Enter NT hash for $SRC (32 chars): " nt_hash </dev/tty
-                            if [[ "$nt_hash" =~ ^[a-fA-F0-9]{32}$ ]]; then
-                                get_ticket "$DC_FQDN" -u "$SRC" -H "$nt_hash"
-                                [ $? -eq 0 ] && break 2
-                                break
-                            else
-                                echo "[-] Invalid hash format. Must be 32-character hex string."
-                            fi
-                        done
-                        ;;
-                    3)
-                        while true; do
-                            read -erp "[?] Enter path to Kerberos ticket file: " ticket_file </dev/tty
-                            if [[ -f "$ticket_file" && -s "$ticket_file" ]]; then
-                                cp "$ticket_file" "./${USER}.ccache"
-                                export KRB5CCNAME="$ticket_file"
-                                klist && break 2 || echo "[-] Invalid/expired ticket file"; break
-                            else
-                                echo "[-] Invalid ticket file"
-                                break
-                            fi
-                        done
-                        ;;
-                    *)
-                        echo "[-] Invalid selection. Please choose 1, 2, or 3."
-                        ;;
-                esac
-                echo -e "[-] Authentication failed. Please try again.\n"
-            done
+            authenticate_group_member $source $DC_FQDN
         else
             SRC="$source"
         fi
