@@ -151,13 +151,6 @@ def make_chains_fast(input_file_path, dacl_output_file, member_output_file):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
-        print(
-            "Usage: ./process_chains.py <input_file> <dacl_output_file> <member_output_file>",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
     input_file = sys.argv[1]
     dacl_output = sys.argv[2]
     member_output = sys.argv[3]

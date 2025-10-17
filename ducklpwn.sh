@@ -547,6 +547,7 @@ else
     # Owned users query with the same comprehensive filtering
     DACL_JSON=$(curl -s "$BH_URL/api/v2/graphs/cypher" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"query\":\"MATCH p=shortestPath((s)-[:Owns|GenericAll|WriteGPLink|MemberOf|GPOAppliesTo|GenericWrite|WriteOwner|WriteDacl|ForceChangePassword|AllExtendedRights|AddMember|HasSession|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions*1..]->(t)) WHERE (s:User OR s:Computer) AND (t:User OR t:Computer OR (t:Group AND NOT t.objectid =~ '.*-(581|578|568|554|498|558|552|521|553|557|561|513|582|579|575|571|559|577|576|517|1102|522|569|574|545|515|572|560|556)$' AND NOT t.distinguishedname =~ '.*EXCHANGE INSTALL DOMAIN.*') OR t:OU OR t:Domain) AND NOT (t.distinguishedname =~ '.*(EXCHANGE ONLINE-APPLICATION|GUEST|DEFAULTACCOUNT|SYSTEMMAILBOX|DISCOVERYSEARCHMAILBOX|FEDERATEDEMAIL|HEALTHMAILBOX|MIGRATION).*') AND s<>t AND ANY(tag IN s.system_tags WHERE tag = 'owned') AND s.domain = '${flt_domain}' RETURN p\"}")
 fi
+
 echo -e "\n${GRAY}[*] Query executed, parsing it..."
 
 DACL=$(echo -e "$DACL_JSON" | jq -r '
@@ -577,7 +578,6 @@ if [[ ! -z $DACL ]]; then
     
     # Parse and prepare DACL data - handle domain suffixes properly
     echo -e "$DACL" | sed 's/BREAK /\n/g' | sed 's/BREAK//g' | sed "s/@${flt_domain}//g" | sed "s/\.${flt_domain}//g" | sed 's/[[:space:]]*$//' | sort -u > "$DUCKPWN_DIR/DACL_${flt_domain}"
-    
     echo -e "[*] Processed $(wc -l < "$DUCKPWN_DIR/DACL_${flt_domain}") unique relationships"
 
     # Only align if we have relationships
@@ -650,26 +650,11 @@ if [[ -s "$DUCKPWN_DIR/OU_TARGETS_${flt_domain}.txt" ]]; then
         fi
     fi
 fi
+
 input_file="$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt"
+# --------------------------------------Main menu 
 
-# Verify file exists and is readable
-if [ ! -f "$input_file" ] || [ ! -r "$input_file" ]; then
-    echo -e "[-] ERROR: Cannot read file '$input_file'"
-    exit 1
-fi
-
-# Read chains from file into array (ignoring empty/commented lines)
-readarray -t chains < <(grep -v -e '^$' -e '^#' "$input_file")
-
-# Check if we got any chains
-if [ ${#chains[@]} -eq 0 ]; then
-    echo -e "[-] ERROR: No valid chains found in file"
-    exit 1
-fi
-
-# --------------------------------------Main menu - simplified version
-
-# Read all chains into an array (with colors preserved)
+# Read all chains into an array
 readarray -t all_chains < "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt"
 
 # Check if we have any chains
