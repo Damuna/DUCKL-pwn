@@ -789,9 +789,7 @@ for chain in "${selected_chains[@]}"; do
         type=$(color_to_obj "$(echo "$cmd" | awk -F'"' '{print $4}')")  # Changed from $3 to $4
         abuse=$(echo "$cmd" | awk '{print $1}' | sed 's/\x1B\[[0-9;]*[mGK]//g')
 
-        if [[ "$prev_abuse" == "MemberOf" && "$prev_source_type" == "User" ]]; then
-            SRC="$prev_src"
-        elif [[ "$source_type" == "Group" && "$prev_abuse" != "MemberOf" ]]; then
+        if [[ "$source_type" == "Group" && "$prev_abuse" != "MemberOf" ]]; then
             while true; do
                 # Ask for username - use $source (the group name) in prompt
                 read -erp $'[?] Enter username for a member of '"${source}"$'\e[0m: ' username </dev/tty
