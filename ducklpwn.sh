@@ -492,31 +492,6 @@ if [[ $NO_GATHER == false ]]; then
     fi
 fi
 
-show_progress() {
-    local current=$1
-    local total=$2
-    local width=50
-    local percentage=$((current * 100 / total))
-    local completed=$((current * width / total))
-    local remaining=$((width - completed))
-    
-    printf "\r[%-*s] %d%%" "$width" "$(printf '#%.0s' $(seq 1 $completed))" "$percentage"
-}
-
-
-# Process chains with progress
-process_with_progress() {
-    local input_file="$1"
-    local total_lines=$(wc -l < "$input_file")
-    local count=0
-    
-    while IFS= read -r line; do
-        ((count++))
-        show_progress "$count" "$total_lines"
-        # Process line
-    done < "$input_file"
-    echo  # New line after progress
-}
 
 show_color_legend() {
     echo -e "\n${BOLD}LEGEND:${NC}"
@@ -548,6 +523,7 @@ else
     DACL_JSON=$(curl -s "$BH_URL/api/v2/graphs/cypher" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"query\":\"MATCH p=shortestPath((s)-[:Owns|GenericAll|WriteGPLink|MemberOf|GPOAppliesTo|GenericWrite|WriteOwner|WriteDacl|ForceChangePassword|AllExtendedRights|AddMember|HasSession|AllowedToDelegate|CoerceToTGT|AllowedToAct|AdminTo|CanPSRemote|CanRDP|ExecuteDCOM|AddSelf|DCSync|ReadLAPSPassword|ReadGMSAPassword|DumpSMSAPassword|SQLAdmin|AddAllowedToAct|WriteSPN|AddKeyCredentialLink|SyncLAPSPassword|WriteAccountRestrictions*1..]->(t)) WHERE (s:User OR s:Computer) AND (t:User OR t:Computer OR (t:Group AND NOT t.objectid =~ '.*-(581|578|568|554|498|558|552|521|553|557|561|513|582|579|575|571|559|577|576|517|1102|522|569|574|545|515|572|560|556)$' AND NOT t.distinguishedname =~ '.*EXCHANGE INSTALL DOMAIN.*') OR t:OU OR t:Domain) AND NOT (t.distinguishedname =~ '.*(EXCHANGE ONLINE-APPLICATION|GUEST|DEFAULTACCOUNT|SYSTEMMAILBOX|DISCOVERYSEARCHMAILBOX|FEDERATEDEMAIL|HEALTHMAILBOX|MIGRATION).*') AND s<>t AND ANY(tag IN s.system_tags WHERE tag = 'owned') AND s.domain = '${flt_domain}' RETURN p\"}")
 fi
 
+echo $DACL_JSON
 echo -e "\n${GRAY}[*] Query executed, parsing it..."
 
 DACL=$(echo -e "$DACL_JSON" | jq -r '
@@ -560,6 +536,15 @@ DACL=$(echo -e "$DACL_JSON" | jq -r '
   } |
   "\(.source.label)|\(.source.kind)|\(.target.label)|\(.target.kind)|\(.label)"
 ' | while IFS="|" read -r source_label source_kind target_label target_kind abuse_type; do
+
+    # Append '$' to computer names if they are of kind "Computer"
+    if [[ "$source_kind" == "Computer" && "$source_label" != *\$ ]]; then
+        source_label="${source_label}$"
+    fi
+    if [[ "$target_kind" == "Computer" && "$target_label" != *\$ ]]; then
+        target_label="${target_label}$"
+    fi
+    
     # Colorize the source label (name) based on its kind
     colored_source_label="$(colorize_label "$source_label" "$source_kind")"
     colored_target_label="$(colorize_label "$target_label" "$target_kind")"
@@ -587,7 +572,7 @@ if [[ ! -z $DACL ]]; then
         echo -e "[-] No relationships found after parsing DACL data"
         exit 1
     fi
-
+    cat "$DUCKPWN_DIR/DACL_${flt_domain}" | grep IT
     "$SCRIPT_DIR/make_chains.py" "$DUCKPWN_DIR/DACL_${flt_domain}" "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt" "$DUCKPWN_DIR/GRPS_${flt_domain}.txt"
 
     end_time=$(date +%s)
@@ -880,3 +865,5 @@ for chain in "${selected_chains[@]}"; do
         done
     done
 done
+
+echo -e "${YELLOW}\n[+] All exploitation chains completed successfully!\n${NC}" >/dev/tty
