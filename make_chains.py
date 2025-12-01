@@ -3,18 +3,26 @@ import collections
 import re
 import sys
 
-
-def make_chains_fast(input_file_path, dacl_output_file, member_output_file):
+def make_chains_clean(input_file_path, dacl_output_file, member_output_file):
     """
-    Parses a graph from a file, finds all paths from start nodes to end nodes,
-    and outputs them to two separate files: DACL chains and membership chains.
+    Parses a graph from a file.
+    1. Outputs all direct membership relationships to member_output_file.
+    2. Calculates effective permissions.
+       - If a node is a Group (has members), it applies the permission to the members 
+         and SKIPS the group itself to avoid redundancy.
+       - If a node is a User (has no members), it keeps the permission.
     """
-    graph = collections.defaultdict(list)
-    in_degree = collections.defaultdict(int)
-    nodes = set()
+    
+    # Store edges
+    member_edges = []
+    permission_edges = []
+    
+    # Reverse membership: Group -> [List of immediate members]
+    reverse_membership = collections.defaultdict(list)
 
     line_regex = re.compile(r"^\s*(.*?)\s*---(.*?)\s*-->\s*(.*?)\s*$")
 
+    print(f"[*] Reading input file: {input_file_path}...")
     try:
         with open(input_file_path, "r") as f:
             for line in f:
@@ -23,129 +31,93 @@ def make_chains_fast(input_file_path, dacl_output_file, member_output_file):
                     continue
 
                 source, edge_type, target = match.groups()
+                source = source.strip()
+                edge_type = edge_type.strip()
+                target = target.strip()
 
-                graph[source].append((edge_type, target))
-                nodes.add(source)
-                nodes.add(target)
-                in_degree[target] += 1
+                if "MemberOf" in edge_type:
+                    member_edges.append((source, target))
+                    reverse_membership[target].append(source)
+                else:
+                    permission_edges.append((source, edge_type, target))
+
     except FileNotFoundError:
         print(f"Error: File not found at '{input_file_path}'", file=sys.stderr)
         sys.exit(1)
 
-    start_nodes = [node for node in nodes if in_degree[node] == 0]
-
-    dacl_chains = set()
-    member_chains = set()
-
-    def find_paths_from(node, current_path, visited, current_edges):
-        visited.add(node)
-
-        # Build the current chain string
-        if current_path:
-            current_chain = f"{current_path} ---{current_edges[-1][0]}--> {node}"
-        else:
-            current_chain = node
-
-        # Check if this is an end node (no outgoing edges)
-        if node not in graph:
-            process_complete_chain(current_chain, current_edges)
-            return
-
-        # Continue traversal
-        has_unvisited = False
-        for edge_type, neighbor in graph[node]:
-            if neighbor not in visited:
-                has_unvisited = True
-                new_edges = current_edges + [(edge_type, neighbor)]
-                find_paths_from(neighbor, current_chain, visited.copy(), new_edges)
-
-        # If no unvisited neighbors, this path ends here
-        if not has_unvisited:
-            process_complete_chain(current_chain, current_edges)
-
-    def process_complete_chain(full_chain, edges):
-        # --- IMPROVED: Extract pure membership chains ---
-        start_node = full_chain.split(" ")[0]
-        path_nodes = [start_node] + [edge[1] for edge in edges]
-
-        for i, (edge_type, target) in enumerate(edges):
-            if "MemberOf" in edge_type:
-                source = path_nodes[i]
-                member_chain = f"{source} ---{edge_type}--> {target}"
-                member_chains.add(member_chain)
-
-        # Create DACL chain by removing MemberOf edges and their groups
-        dacl_chain_parts = []
-        current_source = full_chain.split(" ")[0]
-
-        i = 0
-        while i < len(edges):
-            edge_type, target = edges[i]
-
-            if "MemberOf" in edge_type:
-                # Skip this MemberOf edge and look for the next non-MemberOf edge
-                i += 1
-                # Find the next non-MemberOf edge from the target (group)
-                while i < len(edges) and "MemberOf" in edges[i][0]:
-                    i += 1
-                if i < len(edges):
-                    # Connect current source directly to the target of non-MemberOf edge
-                    next_edge_type, next_target = edges[i]
-                    dacl_chain_parts.append(
-                        f"{current_source} ---{next_edge_type}--> {next_target}"
-                    )
-                    current_source = next_target
-                    i += 1
-            else:
-                # Regular edge, add to DACL chain
-                dacl_chain_parts.append(f"{current_source} ---{edge_type}--> {target}")
-                current_source = target
-                i += 1
-
-        # Join the DACL chain parts
-        if dacl_chain_parts:
-            # Connect consecutive parts properly
-            final_dacl_chain = dacl_chain_parts[0]
-            for part in dacl_chain_parts[1:]:
-                last_node = final_dacl_chain.split("--> ")[-1].strip()
-                new_part_source = part.split(" ")[0].strip()
-
-                if last_node != new_part_source:
-                    final_dacl_chain += f" ---{part.split('---')[1].split('-->')[0]}--> {part.split('--> ')[-1]}"
-                else:
-                    # --- THIS IS THE FIX ---
-                    # Instead of replacing the chain, append the new segment.
-                    # e.g., part is "B ---perm--> C", we append " ---perm--> C"
-                    edge_and_target = part.split(" ", 1)[1]
-                    final_dacl_chain += f" {edge_and_target}"
-
-            dacl_chains.add(final_dacl_chain)
-
-    # Start the search from each identified starting node
-    for start_node in start_nodes:
-        find_paths_from(start_node, "", set(), [])
-
-    # Write DACL chains to file
-    try:
-        with open(dacl_output_file, "w") as f:
-            for chain in sorted(dacl_chains):
-                f.write(chain + "\n")
-    except IOError as e:
-        print(f"Error writing to DACL output file: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    # Write membership chains to file
+    # --- 1. Write Membership Chains ---
+    print(f"[*] Writing membership file: {member_output_file}...")
     try:
         with open(member_output_file, "w") as f:
-            for chain in sorted(member_chains):
-                f.write(chain + "\n")
+            # Sort and unique
+            unique_members = sorted(list(set(f"{s} ---MemberOf--> {t}" for s, t in member_edges)))
+            for line in unique_members:
+                f.write(line + "\n")
     except IOError as e:
         print(f"Error writing to member output file: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # --- 2. Calculate Effective Members (Group Expansion) ---
+    
+    # Iterative BFS to find all effective members (leaves and sub-groups) for a specific group
+    def get_expanded_subjects(start_node):
+        visited = set()
+        queue = collections.deque([start_node])
+        expanded = set()
+
+        while queue:
+            current = queue.popleft()
+            # Who is a member of 'current'?
+            direct_children = reverse_membership.get(current, [])
+            
+            for child in direct_children:
+                if child not in visited:
+                    visited.add(child)
+                    expanded.add(child)
+                    queue.append(child)
+        return expanded
+
+    # --- 3. Build and Write DACL Chains ---
+    print(f"[*] Processing DACL chains (expanding groups, hiding parents)...")
+    dacl_output_lines = set()
+
+    for source, edge_type, target in permission_edges:
+        # Get everyone who is effectively a member of 'source'
+        sub_members = get_expanded_subjects(source)
+        
+        if sub_members:
+            # CASE A: The Source is a Group (it has members).
+            # We ONLY add the lines for the members (the users).
+            # We SKIP the line for the 'source' (the group) to avoid redundancy.
+            for member in sub_members:
+                # Optional: Check if 'member' is itself a group? 
+                # Usually, we want the ultimate users. 
+                # If you want ONLY leaves (users) and no intermediate groups, 
+                # we can check if 'member' is in reverse_membership.
+                # For now, we assume if it's in the list, it's a valid attacker.
+                dacl_output_lines.add(f"{member} ---{edge_type}--> {target}")
+        else:
+            # CASE B: The Source is a User (or empty group).
+            # It has no members, so it is the direct attacker.
+            dacl_output_lines.add(f"{source} ---{edge_type}--> {target}")
+
+    print(f"[*] Writing DACL file: {dacl_output_file}...")
+    try:
+        with open(dacl_output_file, "w") as f:
+            for line in sorted(dacl_output_lines):
+                f.write(line + "\n")
+    except IOError as e:
+        print(f"Error writing to DACL output file: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print("[+] Done.")
 
 if __name__ == "__main__":
+    if len(sys.argv) < 4:
+        print("Usage: ./script.py <input_file> <dacl_output> <member_output>")
+        sys.exit(1)
+        
     input_file = sys.argv[1]
     dacl_output = sys.argv[2]
     member_output = sys.argv[3]
-    make_chains_fast(input_file, dacl_output, member_output)
+    make_chains_clean(input_file, dacl_output, member_output)
