@@ -392,6 +392,7 @@ color_to_obj() {
 # Dumps and Ingest the Domain ZIP File
 domain=${DC_FQDN#*.}
 flt_domain=${domain^^}
+"$bd_cli" up
 
 if [[ ! -z $PASSWORD ]]; then
     get_ticket "$DC_FQDN" -u "$USERNAME" -p "$PASSWORD"
@@ -571,7 +572,7 @@ if [[ ! -z $DACL ]]; then
         echo -e "[-] No relationships found after parsing DACL data"
         exit 1
     fi
-    cat "$DUCKPWN_DIR/DACL_${flt_domain}" | grep IT
+
     "$SCRIPT_DIR/make_chains.py" "$DUCKPWN_DIR/DACL_${flt_domain}" "$DUCKPWN_DIR/DACL_ABUSE_${flt_domain}.txt" "$DUCKPWN_DIR/GRPS_${flt_domain}.txt"
 
     end_time=$(date +%s)

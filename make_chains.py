@@ -22,7 +22,6 @@ def make_chains_clean(input_file_path, dacl_output_file, member_output_file):
 
     line_regex = re.compile(r"^\s*(.*?)\s*---(.*?)\s*-->\s*(.*?)\s*$")
 
-    print(f"[*] Reading input file: {input_file_path}...")
     try:
         with open(input_file_path, "r") as f:
             for line in f:
@@ -46,7 +45,6 @@ def make_chains_clean(input_file_path, dacl_output_file, member_output_file):
         sys.exit(1)
 
     # --- 1. Write Membership Chains ---
-    print(f"[*] Writing membership file: {member_output_file}...")
     try:
         with open(member_output_file, "w") as f:
             # Sort and unique
@@ -78,7 +76,6 @@ def make_chains_clean(input_file_path, dacl_output_file, member_output_file):
         return expanded
 
     # --- 3. Build and Write DACL Chains ---
-    print(f"[*] Processing DACL chains (expanding groups, hiding parents)...")
     dacl_output_lines = set()
 
     for source, edge_type, target in permission_edges:
@@ -101,7 +98,6 @@ def make_chains_clean(input_file_path, dacl_output_file, member_output_file):
             # It has no members, so it is the direct attacker.
             dacl_output_lines.add(f"{source} ---{edge_type}--> {target}")
 
-    print(f"[*] Writing DACL file: {dacl_output_file}...")
     try:
         with open(dacl_output_file, "w") as f:
             for line in sorted(dacl_output_lines):
@@ -109,8 +105,6 @@ def make_chains_clean(input_file_path, dacl_output_file, member_output_file):
     except IOError as e:
         print(f"Error writing to DACL output file: {e}", file=sys.stderr)
         sys.exit(1)
-
-    print("[+] Done.")
 
 if __name__ == "__main__":
     if len(sys.argv) < 4:
